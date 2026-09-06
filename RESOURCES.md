@@ -1,8 +1,7 @@
-# DevFlow AI — Phase 1 Resource & Setup Plan
+# DevFlow AI — Resource & Setup Plan
 
-Scope: Phase 1 MVP only (GitHub + Jira + Slack, no AI yet). Solo/local development using
-Docker Compose (via Colima) + ngrok — no cloud hosting required. LLM provider chosen for when Phase 2
-starts: Groq.
+Accounts, local dev setup (Docker Compose via Colima + ngrok), and deployment (Render) needed to
+run the full system — GitHub + Jira + Slack event wiring, plus the Groq-powered AI layer.
 
 ## Accounts / Resources
 
@@ -10,7 +9,7 @@ starts: Groq.
 |---|----------|----------|------|-------------|
 | 1 | GitHub account | Source events, Actions | Free | Create a throwaway repo (e.g. `devflow-test-repo`) to generate real PR/workflow events |
 | 2 | GitHub webhook + PAT | Ingest PR/workflow events; call GitHub API | Free | Repo → Settings → Webhooks → point at your ngrok URL + `/webhooks/github`. Fine-grained PAT covers read access to PRs/workflow runs. Full GitHub App/OAuth is deferred to Phase 4 |
-| 3 | Atlassian account + Jira Cloud site | Ticket tracking, status webhooks | Free (Free plan, up to 10 users) | Create a site at `<you>.atlassian.net`, one project (e.g. key `AITENDER`) |
+| 3 | Atlassian account + Jira Cloud site | Ticket tracking, status webhooks | Free (Free plan, up to 10 users) | Create a site at `<you>.atlassian.net`, one project (e.g. key `KAN`) |
 | 4 | Jira API token | `jira.get_issue()`, `create_issue()`, `add_comment()` | Free | id.atlassian.com → Security → API tokens. Basic auth (email + token) — no OAuth app needed for solo use |
 | 5 | Jira webhook | Status-changed / issue-updated events | Free | Jira Admin → System → WebHooks — you're the site admin, so no Connect/OAuth app required. Point at ngrok URL + `/webhooks/jira?token=...` |
 | 6 | Slack workspace + Slack App | Notifications, slash command, `@DevFlow` mentions | Free | Create a personal workspace at slack.com, register app at api.slack.com/apps. Scopes: `chat:write`, `app_mentions:read`, `commands`, `channels:history` |

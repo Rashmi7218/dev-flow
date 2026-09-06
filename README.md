@@ -92,7 +92,7 @@ app/
   models.py          events, pull_requests, workflow_runs, issues, processed_deliveries
   security.py        GitHub HMAC + Slack signature verification
   idempotency.py      Webhook delivery dedup (see "Reliability" below)
-  correlation.py      Ticket-key extraction (branch/title/commit -> AITENDER-2445)
+  correlation.py      Ticket-key extraction (branch/title/commit -> KAN-42)
   integrations/       Thin HTTP clients for GitHub, Jira, Slack, Groq APIs
   webhooks/           Webhook route handlers per source
   dashboard.py        Read-only /dashboard page + /api/events, /api/tickets/{key}/timeline

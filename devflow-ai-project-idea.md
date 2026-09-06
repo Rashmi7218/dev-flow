@@ -1,5 +1,14 @@
 # DevFlow AI — Intelligent Engineering Workflow Automation Platform
 
+> **Note on this document:** this is the original product/architecture vision, written before
+> any code existed. It deliberately reaches further than a first version should — a bigger spec
+> makes it easier to see what to cut. The actual system (see the [README](README.md) for current
+> state) implements a focused subset of this: a synchronous FastAPI service with direct GitHub/
+> Jira/Slack/Groq integrations, not the full LangGraph/MCP/multi-tenant SaaS architecture sketched
+> below. Sections describing infrastructure that was scoped out (message queues, MCP, RAG, Teams,
+> OAuth/RBAC, multi-tenancy) are kept here as the longer-term roadmap, not a claim about what
+> exists today. The "MVP Scope" section (§22) is the actual phase plan that was followed.
+
 ## 1. Project Overview
 
 **DevFlow AI** is an event-driven engineering operations platform that connects **GitHub**, **Jira**, and **Slack / Microsoft Teams** to automate software-delivery communication, status tracking, failure reporting, ticket creation, and AI-assisted engineering workflows.
@@ -1011,81 +1020,5 @@ Measure:
 - Slack notification latency
 - Average LLM cost per event
 
-# 24. Portfolio Value
-
-This project demonstrates:
-
-## Backend Engineering
-
-- FastAPI
-- Async APIs
-- Webhooks
-- Queues
-- PostgreSQL
-- Redis
-- Background workers
-
-## AI Engineering
-
-- LLM summarization
-- Structured outputs
-- Agents
-- Tool calling
-- RAG
-- Evaluation
-
-## Agent Infrastructure
-
-- MCP
-- LangGraph
-- Human approval
-- Tool permissions
-- Agent tracing
-
-## Integrations
-
-- GitHub
-- Jira
-- Slack
-- Microsoft Teams
-
-## Production Engineering
-
-- OAuth
-- RBAC
-- Retries
-- Idempotency
-- Observability
-- Multi-tenancy
-- Rate limiting
-- Failure recovery
-- Audit logs
-
-# 25. Suggested Repository Name
-
-Recommended:
-
-```text
-devflow-ai
-```
-
-Alternative names:
-
-```text
-engineering-ops-agent
-ai-devops-copilot
-devflow-platform
-engineering-workflow-ai
-```
-
-# 26. Suggested GitHub Description
-
-> **DevFlow AI is an event-driven engineering operations platform that connects GitHub, Jira, and Slack/Teams to automatically track software delivery, summarize code and deployment changes, surface failures, and execute engineering workflows through MCP-powered tools.**
-
-# 27. Portfolio Positioning
-
-This project should become a flagship public repository because it proves that you can build:
-
-> **AI inside a real distributed software system rather than simply building an application around an LLM.**
-
-It combines AI engineering, backend architecture, event-driven systems, integrations, agent tooling, security, reliability, and production operations in one coherent project.
+This remains open work — see "Known limitations" in the [README](README.md) for what's tracked
+today versus what's still a gap.
