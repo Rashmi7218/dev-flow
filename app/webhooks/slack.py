@@ -6,9 +6,11 @@ from urllib.parse import parse_qsl
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db import SessionLocal
+from app.db import SessionLocal, get_db
+from app.idempotency import is_duplicate_delivery
 from app.integrations import groq_client, jira_client, slack_client
 from app.models import PullRequest, WorkflowRun
 from app.security import verify_slack_signature
@@ -24,6 +26,7 @@ TICKET_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b", re.IGNORECASE)
 @router.post("/events")
 async def handle_slack_events(
     background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
     body: bytes = Depends(verify_slack_signature),
 ):
     payload = json.loads(body)
@@ -31,6 +34,11 @@ async def handle_slack_events(
         return {"challenge": payload["challenge"]}
 
     if payload.get("type") == "event_callback":
+        event_id = payload.get("event_id")
+        if event_id and await is_duplicate_delivery(db, f"slack:{event_id}"):
+            return {"status": "duplicate"}
+        await db.commit()
+
         event = payload.get("event", {})
         if event.get("type") == "app_mention":
             raw_text = MENTION_RE.sub("", event.get("text", "")).strip()

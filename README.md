@@ -55,6 +55,15 @@ Tests run against an in-memory SQLite DB and mock all outbound HTTP (GitHub, Jir
 via `respx` — no live credentials or Docker needed. CI (`.github/workflows/ci.yml`) runs this
 suite on every push/PR.
 
+## Reliability
+
+Webhook deliveries are deduped by their provider-supplied delivery ID (`X-GitHub-Delivery` for
+GitHub, `X-Atlassian-Webhook-Identifier` for Jira, `event_id` for Slack Events API) against a
+`processed_deliveries` table (`app/idempotency.py`). A provider retry of an already-processed
+delivery returns `{"status": "duplicate"}` immediately, without re-posting to Slack, re-creating
+Jira tickets, or re-calling Groq — this matters because GitHub and Slack both retry webhook
+deliveries on timeout/non-2xx responses in production.
+
 ## Known Phase 1 simplifications
 
 - Events are processed inline in the webhook request, not via a queue/worker (Redis/Celery
@@ -63,3 +72,7 @@ suite on every push/PR.
   `(repo, number)` — simplest for now, revisit if "current status" queries need it.
 - Jira webhook auth is a shared-secret query token, since Jira Cloud's built-in webhook UI
   doesn't support custom signing.
+
+## License
+
+[MIT](LICENSE)

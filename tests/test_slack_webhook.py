@@ -87,6 +87,47 @@ async def test_command_create_acks_immediately_and_creates_issue_in_background(c
 
 
 @respx.mock
+async def test_duplicate_event_id_is_not_reprocessed(client):
+    respx.get("https://test.atlassian.net/rest/api/3/issue/KAN-4").mock(
+        return_value=Response(
+            200, json={"fields": {"status": {"name": "In Progress"}, "summary": "Add login"}}
+        )
+    )
+    respx.post("https://api.groq.com/openai/v1/chat/completions").mock(
+        return_value=Response(
+            200, json={"choices": [{"message": {"content": "Still being worked on."}}]}
+        )
+    )
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = json.dumps(
+        {
+            "type": "event_callback",
+            "event_id": "Ev0SAME00",
+            "event": {
+                "type": "app_mention",
+                "text": "<@BOTID> what's up with KAN-4?",
+                "channel": "C123",
+                "ts": "111.222",
+            },
+        }
+    ).encode()
+
+    first = await client.post(
+        "/webhooks/slack/events", content=body, headers=_slack_headers(body)
+    )
+    second = await client.post(
+        "/webhooks/slack/events", content=body, headers=_slack_headers(body)
+    )
+
+    assert first.json() == {"status": "accepted"}
+    assert second.json() == {"status": "duplicate"}
+    assert slack_route.call_count == 1
+
+
+@respx.mock
 async def test_app_mention_with_ticket_key_answers_status_query(client):
     respx.get("https://test.atlassian.net/rest/api/3/issue/KAN-4").mock(
         return_value=Response(

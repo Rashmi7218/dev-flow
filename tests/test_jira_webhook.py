@@ -70,3 +70,23 @@ async def test_non_status_change_does_not_post_to_slack(client):
 
     assert resp.status_code == 200
     assert not slack_route.called
+
+
+@respx.mock
+async def test_duplicate_webhook_identifier_is_not_reprocessed(client):
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+    headers = {"X-Atlassian-Webhook-Identifier": "same-id"}
+    body = json.dumps(_issue_payload())
+
+    first = await client.post(
+        f"/webhooks/jira?token={settings.jira_webhook_token}", content=body, headers=headers
+    )
+    second = await client.post(
+        f"/webhooks/jira?token={settings.jira_webhook_token}", content=body, headers=headers
+    )
+
+    assert first.json() == {"status": "accepted"}
+    assert second.json() == {"status": "duplicate"}
+    assert slack_route.call_count == 1

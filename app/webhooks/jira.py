@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_db
+from app.idempotency import is_duplicate_delivery
 from app.integrations import slack_client
 from app.models import Event, Issue
 
@@ -17,10 +18,15 @@ async def handle_jira_webhook(
     if token != settings.jira_webhook_token:
         raise HTTPException(status_code=401, detail="Invalid webhook token")
 
+    delivery_id = request.headers.get("X-Atlassian-Webhook-Identifier")
+    if delivery_id and await is_duplicate_delivery(db, f"jira:{delivery_id}"):
+        return {"status": "duplicate"}
+
     payload = await request.json()
     webhook_event = payload.get("webhookEvent", "")
     issue = payload.get("issue")
     if not issue:
+        await db.commit()
         return {"status": "ignored"}
 
     key = issue["key"]

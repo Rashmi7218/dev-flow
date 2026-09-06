@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.correlation import extract_ticket_key
 from app.db import get_db
+from app.idempotency import is_duplicate_delivery
 from app.integrations import github_client, groq_client, slack_client
 from app.models import Event, PullRequest, WorkflowRun
 from app.security import verify_github_signature
@@ -22,6 +23,10 @@ async def handle_github_webhook(
     body: bytes = Depends(verify_github_signature),
 ):
     event_type = request.headers.get("X-GitHub-Event", "")
+    delivery_id = request.headers.get("X-GitHub-Delivery")
+    if delivery_id and await is_duplicate_delivery(db, f"github:{delivery_id}"):
+        return {"status": "duplicate"}
+
     payload = json.loads(body)
 
     if event_type == "pull_request":
@@ -29,6 +34,7 @@ async def handle_github_webhook(
     elif event_type == "workflow_run":
         await _handle_workflow_run(db, payload)
 
+    await db.commit()
     return {"status": "accepted"}
 
 

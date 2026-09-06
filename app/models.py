@@ -63,6 +63,15 @@ class Issue(Base):
     )
 
 
+class ProcessedDelivery(Base):
+    __tablename__ = "processed_deliveries"
+
+    id: Mapped[str] = mapped_column(String(150), primary_key=True)
+    received_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 

@@ -35,6 +35,49 @@ async def test_missing_signature_rejected(client):
     assert resp.status_code == 401
 
 
+@respx.mock
+async def test_duplicate_delivery_id_is_not_reprocessed(client):
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = json.dumps(_pr_payload("opened")).encode()
+    headers = {
+        "X-GitHub-Event": "pull_request",
+        "X-Hub-Signature-256": _sign(body),
+        "X-GitHub-Delivery": "same-delivery-id",
+    }
+
+    first = await client.post("/webhooks/github", content=body, headers=headers)
+    second = await client.post("/webhooks/github", content=body, headers=headers)
+
+    assert first.status_code == 200
+    assert first.json() == {"status": "accepted"}
+    assert second.status_code == 200
+    assert second.json() == {"status": "duplicate"}
+    assert slack_route.call_count == 1
+
+
+@respx.mock
+async def test_different_delivery_ids_both_processed(client):
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = json.dumps(_pr_payload("opened")).encode()
+    headers_1 = {
+        "X-GitHub-Event": "pull_request",
+        "X-Hub-Signature-256": _sign(body),
+        "X-GitHub-Delivery": "delivery-1",
+    }
+    headers_2 = {**headers_1, "X-GitHub-Delivery": "delivery-2"}
+
+    await client.post("/webhooks/github", content=body, headers=headers_1)
+    await client.post("/webhooks/github", content=body, headers=headers_2)
+
+    assert slack_route.call_count == 2
+
+
 async def test_invalid_signature_rejected(client):
     body = json.dumps(_pr_payload("opened")).encode()
     resp = await client.post(
