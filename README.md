@@ -51,6 +51,21 @@ flowchart LR
     API --> DASH[Dashboard\nevents + ticket timeline]
 ```
 
+## Screenshots
+
+**Dashboard** — recent events feed + per-ticket timeline aggregating GitHub, Jira, and CI data
+![Dashboard](screenshots/Dashboard.png)
+
+**AI PR summary in Slack** — opened PR gets an AI-generated summary of what changed and why
+![AI PR summary](screenshots/slack-PR-summary.png)
+
+**AI CI-failure explanation** — a failed workflow run gets a likely cause, failed stage, and
+suggested next action, not just a red X
+![CI failure explanation](screenshots/PR-updates.png)
+
+**Slack thread → Jira ticket (with human approval) + natural-language status queries**
+![Thread to ticket and status query](screenshots/mention-devflow.png)
+
 ## Setup
 
 1. Work through [RESOURCES.md](RESOURCES.md) to create the GitHub/Jira/Slack accounts and
