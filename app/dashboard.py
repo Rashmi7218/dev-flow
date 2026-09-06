@@ -23,9 +23,21 @@ async def dashboard_page() -> str:
 
 
 @router.get("/api/events")
-async def list_events(limit: int = 50, db: AsyncSession = Depends(get_db)):
+async def list_events(
+    limit: int = 50,
+    source: str | None = None,
+    ticket_key: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
     limit = max(1, min(limit, 200))
-    result = await db.execute(select(Event).order_by(Event.id.desc()).limit(limit))
+    query = select(Event)
+    if source:
+        query = query.where(Event.source == source)
+    if ticket_key:
+        query = query.where(Event.ticket_key == ticket_key.upper())
+    query = query.order_by(Event.id.desc()).limit(limit)
+
+    result = await db.execute(query)
     events = result.scalars().all()
     return [
         {
@@ -37,6 +49,24 @@ async def list_events(limit: int = 50, db: AsyncSession = Depends(get_db)):
         }
         for e in events
     ]
+
+
+@router.get("/api/tickets/recent")
+async def recent_tickets(limit: int = 8, db: AsyncSession = Depends(get_db)):
+    limit = max(1, min(limit, 50))
+    result = await db.execute(
+        select(Event.ticket_key)
+        .where(Event.ticket_key.is_not(None))
+        .order_by(Event.id.desc())
+        .limit(200)
+    )
+    seen: list[str] = []
+    for (key,) in result.all():
+        if key not in seen:
+            seen.append(key)
+        if len(seen) >= limit:
+            break
+    return seen
 
 
 @router.get("/api/tickets/{key}/timeline")

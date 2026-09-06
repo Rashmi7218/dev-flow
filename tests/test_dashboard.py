@@ -2,7 +2,7 @@ import respx
 from httpx import Response
 
 from app.db import SessionLocal
-from app.models import Issue, PullRequest, WorkflowRun
+from app.models import Event, Issue, PullRequest, WorkflowRun
 
 
 async def _seed(*objs):
@@ -25,8 +25,6 @@ async def test_events_endpoint_empty(client):
 
 
 async def test_events_endpoint_orders_newest_first(client):
-    from app.models import Event
-
     await _seed(
         Event(source="github", event_type="pull_request.opened", payload={}, ticket_key="KAN-1"),
         Event(source="jira", event_type="jira:issue_updated", payload={}, ticket_key="KAN-1"),
@@ -41,11 +39,61 @@ async def test_events_endpoint_orders_newest_first(client):
 
 
 async def test_events_endpoint_respects_limit(client):
-    from app.models import Event
-
     await _seed(*[Event(source="github", event_type="x", payload={}) for _ in range(5)])
 
     resp = await client.get("/api/events?limit=2")
+
+    assert len(resp.json()) == 2
+
+
+async def test_events_endpoint_filters_by_source(client):
+    await _seed(
+        Event(source="github", event_type="pull_request.opened", payload={}),
+        Event(source="jira", event_type="jira:issue_updated", payload={}),
+    )
+
+    resp = await client.get("/api/events?source=jira")
+    events = resp.json()
+
+    assert len(events) == 1
+    assert events[0]["source"] == "jira"
+
+
+async def test_events_endpoint_filters_by_ticket_key_case_insensitive(client):
+    await _seed(
+        Event(source="github", event_type="a", payload={}, ticket_key="KAN-1"),
+        Event(source="github", event_type="b", payload={}, ticket_key="KAN-2"),
+    )
+
+    resp = await client.get("/api/events?ticket_key=kan-1")
+    events = resp.json()
+
+    assert len(events) == 1
+    assert events[0]["ticket_key"] == "KAN-1"
+
+
+async def test_recent_tickets_returns_distinct_keys_newest_first(client):
+    await _seed(
+        Event(source="github", event_type="a", payload={}, ticket_key="KAN-1"),
+        Event(source="github", event_type="b", payload={}, ticket_key="KAN-2"),
+        Event(source="github", event_type="c", payload={}, ticket_key="KAN-1"),
+        Event(source="github", event_type="d", payload={}, ticket_key=None),
+    )
+
+    resp = await client.get("/api/tickets/recent")
+
+    assert resp.json() == ["KAN-1", "KAN-2"]
+
+
+async def test_recent_tickets_respects_limit(client):
+    await _seed(
+        *[
+            Event(source="github", event_type="x", payload={}, ticket_key=f"KAN-{i}")
+            for i in range(5)
+        ]
+    )
+
+    resp = await client.get("/api/tickets/recent?limit=2")
 
     assert len(resp.json()) == 2
 

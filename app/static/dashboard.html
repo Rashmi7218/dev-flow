@@ -11,9 +11,13 @@
     --text: #1a1d21;
     --muted: #6b7280;
     --accent: #4f46e5;
+    --accent-bg: #eef2ff;
     --success: #16a34a;
+    --success-bg: #ecfdf3;
     --fail: #dc2626;
+    --fail-bg: #fef2f2;
     --pending: #d97706;
+    --pending-bg: #fffbeb;
   }
   * { box-sizing: border-box; }
   body {
@@ -49,6 +53,8 @@
     justify-content: space-between;
     align-items: center;
   }
+  .card h2 .h2-actions { display: flex; align-items: center; gap: 10px; font-weight: 400; }
+  .card h2 .last-updated { font-size: 11px; color: var(--muted); }
   .card h2 button {
     font-size: 12px;
     padding: 4px 10px;
@@ -62,7 +68,8 @@
   th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); }
   th { color: var(--muted); font-weight: 500; }
   tr:last-child td { border-bottom: none; }
-  .ticket-search { display: flex; gap: 8px; margin-bottom: 16px; }
+
+  .ticket-search { display: flex; gap: 8px; margin-bottom: 12px; }
   .ticket-search input {
     flex: 1;
     padding: 8px 10px;
@@ -79,6 +86,54 @@
     font-size: 14px;
     cursor: pointer;
   }
+  .quick-links { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+  .quick-links .chip {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .quick-links .chip:hover { border-color: var(--accent); color: var(--accent); }
+  .quick-links .chip-label { font-size: 12px; color: var(--muted); padding: 3px 0; }
+
+  .filters { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; }
+  .filters select, .filters input {
+    padding: 6px 9px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    background: var(--card);
+    color: var(--text);
+  }
+  .filters input { flex: 1; }
+  .filters button {
+    font-size: 12px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    cursor: pointer;
+    color: var(--muted);
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .badge.src-github { background: var(--accent-bg); color: var(--accent); }
+  .badge.src-jira { background: var(--pending-bg); color: var(--pending); }
+  .badge.src-slack { background: #ecfeff; color: #0891b2; }
+  .badge.evt-success { background: var(--success-bg); color: var(--success); }
+  .badge.evt-fail { background: var(--fail-bg); color: var(--fail); }
+  .badge.evt-neutral { background: var(--bg); color: var(--muted); }
+
   .ticket-header { margin-bottom: 18px; }
   .ticket-header .key { font-weight: 600; font-size: 16px; }
   .ticket-header .status {
@@ -86,7 +141,7 @@
     margin-left: 8px;
     padding: 2px 10px;
     border-radius: 999px;
-    background: #eef2ff;
+    background: var(--accent-bg);
     color: var(--accent);
     font-size: 12px;
   }
@@ -137,11 +192,28 @@
       <input id="ticket-input" placeholder="e.g. KAN-4" autocomplete="off">
       <button id="ticket-search-btn">View</button>
     </div>
+    <div id="quick-links" class="quick-links"></div>
     <div id="ticket-result"></div>
   </section>
 
   <section class="card">
-    <h2>Recent Events <button id="refresh-events">Refresh</button></h2>
+    <h2>
+      Recent Events
+      <span class="h2-actions">
+        <span id="last-updated" class="last-updated"></span>
+        <button id="refresh-events">Refresh</button>
+      </span>
+    </h2>
+    <div class="filters">
+      <select id="filter-source">
+        <option value="">All sources</option>
+        <option value="github">github</option>
+        <option value="jira">jira</option>
+        <option value="slack">slack</option>
+      </select>
+      <input id="filter-ticket" placeholder="Filter by ticket (e.g. KAN-4)" autocomplete="off">
+      <button id="filter-clear">Clear</button>
+    </div>
     <table>
       <thead>
         <tr><th>Time</th><th>Source</th><th>Event</th><th>Ticket</th></tr>
@@ -153,42 +225,93 @@
 
 <script>
 function fmtTime(iso) {
-  const d = new Date(iso);
-  return d.toLocaleString();
+  return new Date(iso).toLocaleString();
 }
 
-function statusClass(kind, label) {
+function statusClass(label) {
   const l = label.toLowerCase();
-  if (l.includes('success') || l.includes('merged') || l.includes('succeeded')) return 'success';
+  if (l.includes('success') || l.includes('merged') || l.includes('succeeded') || l.includes('opened')) return 'success';
   if (l.includes('fail')) return 'fail';
   return '';
 }
 
+function eventBadgeClass(eventType) {
+  const t = eventType.toLowerCase();
+  if (t.includes('fail')) return 'evt-fail';
+  if (t.includes('merged') || t.includes('success') || t.includes('opened') || t.includes('created')) return 'evt-success';
+  return 'evt-neutral';
+}
+
+function sourceBadge(source) {
+  return `<span class="badge src-${source}">${source}</span>`;
+}
+
+function eventBadge(eventType) {
+  return `<span class="badge ${eventBadgeClass(eventType)}">${eventType}</span>`;
+}
+
+let lastEventsSignature = null;
+
+function currentFilters() {
+  const source = document.getElementById('filter-source').value;
+  const ticket = document.getElementById('filter-ticket').value.trim();
+  const params = new URLSearchParams({ limit: 50 });
+  if (source) params.set('source', source);
+  if (ticket) params.set('ticket_key', ticket);
+  return params;
+}
+
 async function loadEvents() {
   const tbody = document.getElementById('events-body');
-  tbody.innerHTML = '<tr><td colspan="4" class="empty">Loading…</td></tr>';
+  const params = currentFilters();
+  const hasFilters = params.has('source') || params.has('ticket_key');
+
+  if (tbody.dataset.loaded !== '1') {
+    tbody.innerHTML = '<tr><td colspan="4" class="empty">Loading…</td></tr>';
+  }
+
   try {
-    const resp = await fetch('/api/events?limit=50');
+    const resp = await fetch(`/api/events?${params.toString()}`);
     const events = await resp.json();
+    tbody.dataset.loaded = '1';
+
     if (!events.length) {
-      tbody.innerHTML = '<tr><td colspan="4" class="empty">No events yet.</td></tr>';
-      return;
+      tbody.innerHTML = `<tr><td colspan="4" class="empty">${hasFilters ? 'No events match this filter.' : 'No events yet.'}</td></tr>`;
+    } else {
+      tbody.innerHTML = events.map(e => `
+        <tr>
+          <td>${fmtTime(e.received_at)}</td>
+          <td>${sourceBadge(e.source)}</td>
+          <td>${eventBadge(e.event_type)}</td>
+          <td>${e.ticket_key ? `<a href="#" class="ticket-link" data-key="${e.ticket_key}">${e.ticket_key}</a>` : '—'}</td>
+        </tr>
+      `).join('');
     }
-    tbody.innerHTML = events.map(e => `
-      <tr>
-        <td>${fmtTime(e.received_at)}</td>
-        <td>${e.source}</td>
-        <td>${e.event_type}</td>
-        <td>${e.ticket_key || '—'}</td>
-      </tr>
-    `).join('');
+    document.getElementById('last-updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     tbody.innerHTML = '<tr><td colspan="4" class="error">Failed to load events.</td></tr>';
   }
 }
 
+async function loadRecentTickets() {
+  const container = document.getElementById('quick-links');
+  try {
+    const resp = await fetch('/api/tickets/recent?limit=8');
+    const keys = await resp.json();
+    if (!keys.length) {
+      container.innerHTML = '';
+      return;
+    }
+    container.innerHTML = '<span class="chip-label">Recent:</span>' +
+      keys.map(k => `<span class="chip" data-key="${k}">${k}</span>`).join('');
+  } catch (err) {
+    container.innerHTML = '';
+  }
+}
+
 async function loadTicket(key) {
   const result = document.getElementById('ticket-result');
+  document.getElementById('ticket-input').value = key;
   result.innerHTML = '<div class="empty">Loading…</div>';
   try {
     const resp = await fetch(`/api/tickets/${encodeURIComponent(key)}/timeline`);
@@ -208,7 +331,7 @@ async function loadTicket(key) {
       html += '<div class="empty">No PR or workflow activity recorded yet.</div>';
     } else {
       html += '<div class="timeline">' + data.timeline.map(item => `
-        <div class="timeline-item ${statusClass(item.kind, item.label)}">
+        <div class="timeline-item ${statusClass(item.label)}">
           <div class="label">${item.url ? `<a href="${item.url}" target="_blank">${item.label}</a>` : item.label}</div>
           <div class="detail">${item.detail}</div>
           <div class="ts">${fmtTime(item.timestamp)}</div>
@@ -228,10 +351,36 @@ document.getElementById('ticket-search-btn').addEventListener('click', () => {
 document.getElementById('ticket-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') document.getElementById('ticket-search-btn').click();
 });
+document.getElementById('quick-links').addEventListener('click', (e) => {
+  const key = e.target.dataset.key;
+  if (key) loadTicket(key);
+});
+document.getElementById('events-body').addEventListener('click', (e) => {
+  if (e.target.classList.contains('ticket-link')) {
+    e.preventDefault();
+    loadTicket(e.target.dataset.key);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+});
+
 document.getElementById('refresh-events').addEventListener('click', loadEvents);
+document.getElementById('filter-source').addEventListener('change', loadEvents);
+document.getElementById('filter-clear').addEventListener('click', () => {
+  document.getElementById('filter-source').value = '';
+  document.getElementById('filter-ticket').value = '';
+  loadEvents();
+});
+
+let filterDebounce;
+document.getElementById('filter-ticket').addEventListener('input', () => {
+  clearTimeout(filterDebounce);
+  filterDebounce = setTimeout(loadEvents, 400);
+});
 
 loadEvents();
+loadRecentTickets();
 setInterval(loadEvents, 10000);
+setInterval(loadRecentTickets, 30000);
 </script>
 </body>
 </html>
