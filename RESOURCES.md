@@ -24,7 +24,7 @@ starts: Groq.
 - **OAuth 2.0 / RBAC / multi-tenancy** — Phase 4. Basic auth + PAT/API tokens are enough for a solo instance.
 - **Redis / Celery** — Introduced in Phase 4 reliability work (retries, DLQ, idempotency). Phase 1 processes events inline in the request/response cycle, which is simpler and sufficient at this scale.
 - **Vector DB for RAG** — Phase 3. When needed, Postgres + `pgvector` avoids a new account entirely.
-- **Cloud hosting (Render/Fly/Railway/etc.)** — Only needed once you want an always-on demo instead of local + ngrok.
+- ~~**Cloud hosting (Render/Fly/Railway/etc.)**~~ — Done. See "Deployment (Render)" below.
 
 ## Setup order
 
@@ -39,3 +39,26 @@ starts: Groq.
 
 Everything above is $0, including Groq at light dev usage (a handful of summaries/day comfortably
 fits Groq's free tier) — not a real budget line for a portfolio project.
+
+## Deployment (Render)
+
+`render.yaml` in the repo root is a Render "Blueprint" — infrastructure as code that provisions
+both the web service and a Postgres database from one file.
+
+1. Push the repo to GitHub (already done).
+2. On [render.com](https://render.com), sign up (no credit card needed for free tier) → **New** →
+   **Blueprint** → connect the `dev-flow` GitHub repo. Render detects `render.yaml` automatically.
+3. Render provisions `devflow-db` (free Postgres) and `devflow-api` (free web service built from
+   the `Dockerfile`), wiring `DATABASE_URL` between them automatically.
+4. Render will prompt for the remaining secret env vars (marked `sync: false` in `render.yaml`) —
+   paste in the same values from your local `.env`: `GITHUB_WEBHOOK_SECRET`, `GITHUB_TOKEN`,
+   `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`, `JIRA_WEBHOOK_TOKEN`,
+   `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_DEFAULT_CHANNEL`, `GROQ_API_KEY`.
+5. Deploy. Once live, re-point the GitHub/Jira/Slack webhook configs (and the Slack slash command
+   + Interactivity request URL) from the ngrok URL to `https://<your-service>.onrender.com/...` —
+   this URL is permanent, so ngrok is no longer needed at all.
+6. Check `https://<your-service>.onrender.com/health` and `/dashboard`.
+
+**Free-tier caveats**: the web service spins down after 15 minutes idle (first request after that
+takes ~30-50s to cold-start); the free Postgres database expires after 90 days and needs
+recreating. Fine for a portfolio demo; upgrade to a paid plan for an always-on instance.

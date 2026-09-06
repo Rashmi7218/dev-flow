@@ -25,6 +25,9 @@ has started with a read-only web dashboard at `/dashboard`.
 5. Check `http://localhost:8000/health`.
 6. Browse recent events and per-ticket timelines at `http://localhost:8000/dashboard`.
 
+For an always-on public deployment instead of local + ngrok, see "Deployment (Render)" in
+[RESOURCES.md](RESOURCES.md) — `render.yaml` provisions the whole stack from one file.
+
 ## Layout
 
 ```
