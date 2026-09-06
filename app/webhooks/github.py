@@ -109,6 +109,18 @@ async def _handle_workflow_run(db: AsyncSession, payload: dict) -> None:
     await db.commit()
 
     label = "✅ Succeeded" if conclusion == "success" else f"\U0001f6a8 Failed ({conclusion})"
-    await slack_client.post_message(
-        f"{ticket_key or repo} — Workflow {run['name']} {label}\n\n{run['html_url']}"
-    )
+    text = f"{ticket_key or repo} — Workflow {run['name']} {label}\n\n{run['html_url']}"
+
+    if conclusion not in ("success", None):
+        try:
+            jobs = await github_client.get_workflow_run_jobs(repo, run["id"])
+            explanation = await groq_client.explain_failure(run["name"], jobs)
+            text += (
+                f"\n\n*Likely cause:* {explanation['likely_cause']}"
+                f"\n*Failed stage:* {explanation['failed_stage']}"
+                f"\n*Suggested action:* {explanation['suggested_action']}"
+            )
+        except Exception:
+            pass
+
+    await slack_client.post_message(text)

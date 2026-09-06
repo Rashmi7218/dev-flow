@@ -8,11 +8,15 @@ def _auth() -> tuple[str, str]:
 
 
 def _doc(text: str) -> dict:
-    return {
-        "type": "doc",
-        "version": 1,
-        "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}],
-    }
+    paragraphs = []
+    for para in text.split("\n\n"):
+        content = []
+        for i, line in enumerate(para.split("\n")):
+            if i > 0:
+                content.append({"type": "hardBreak"})
+            content.append({"type": "text", "text": line or " "})
+        paragraphs.append({"type": "paragraph", "content": content})
+    return {"type": "doc", "version": 1, "content": paragraphs}
 
 
 async def get_issue(key: str) -> dict:

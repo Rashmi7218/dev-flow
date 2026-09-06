@@ -26,3 +26,12 @@ async def get_changed_files(repo: str, number: int) -> list[dict]:
         )
         resp.raise_for_status()
         return resp.json()
+
+
+async def get_workflow_run_jobs(repo: str, run_id: int) -> list[dict]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{BASE_URL}/repos/{repo}/actions/runs/{run_id}/jobs", headers=_headers()
+        )
+        resp.raise_for_status()
+        return resp.json()["jobs"]
