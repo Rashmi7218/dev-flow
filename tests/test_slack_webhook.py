@@ -10,13 +10,13 @@ from httpx import Response
 from app.config import settings
 
 
-def _slack_headers(body: bytes) -> dict:
-    timestamp = str(int(time.time()))
-    basestring = f"v0:{timestamp}:{body.decode()}".encode()
+def _slack_headers(body: bytes, timestamp: int | None = None) -> dict:
+    ts = str(timestamp if timestamp is not None else int(time.time()))
+    basestring = f"v0:{ts}:{body.decode()}".encode()
     signature = "v0=" + hmac.new(
         settings.slack_signing_secret.encode(), basestring, hashlib.sha256
     ).hexdigest()
-    return {"X-Slack-Request-Timestamp": timestamp, "X-Slack-Signature": signature}
+    return {"X-Slack-Request-Timestamp": ts, "X-Slack-Signature": signature}
 
 
 async def test_invalid_signature_rejected_on_commands(client):
@@ -25,6 +25,17 @@ async def test_invalid_signature_rejected_on_commands(client):
         "/webhooks/slack/commands",
         content=body,
         headers={"X-Slack-Request-Timestamp": "0", "X-Slack-Signature": "v0=bad"},
+    )
+    assert resp.status_code == 401
+
+
+async def test_stale_timestamp_rejected_even_with_valid_signature(client):
+    body = urlencode({"text": "create something", "response_url": "https://x"}).encode()
+    old_timestamp = int(time.time()) - 600  # 10 minutes old, signature computed to match
+    resp = await client.post(
+        "/webhooks/slack/commands",
+        content=body,
+        headers=_slack_headers(body, timestamp=old_timestamp),
     )
     assert resp.status_code == 401
 
