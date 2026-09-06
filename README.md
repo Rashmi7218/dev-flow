@@ -1,16 +1,55 @@
 # DevFlow AI
 
 ![CI](https://github.com/Rashmi7218/dev-flow/actions/workflows/ci.yml/badge.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Event-driven engineering workflow automation connecting GitHub, Jira, and Slack. See
-[devflow-ai-project-idea.md](devflow-ai-project-idea.md) for the full product vision and
-[RESOURCES.md](RESOURCES.md) for the account/API setup checklist.
+**Event-driven engineering automation that connects GitHub, Jira, and Slack — with an AI layer
+that summarizes PRs, explains CI failures, turns Slack threads into Jira tickets (with human
+approval), and answers natural-language status questions.**
 
-Phase 1 (GitHub/Jira/Slack event wiring) is done: PR/workflow events from GitHub and status
-events from Jira are posted to Slack, and a Slack slash command creates Jira tickets. Phase 2
-(AI layer, via Groq) is done too: PR summaries, CI failure explanations, Slack thread → Jira
-ticket (with human approval), and natural-language ticket status queries via `@DevFlow`. Phase 3
-has started with a read-only web dashboard at `/dashboard`.
+🔗 **Live demo:** [devflow-api-3tiw.onrender.com](https://devflow-api-3tiw.onrender.com/dashboard)
+*(free-tier hosting — sleeps after 15 min idle, first load may take ~30-50s to wake up)*
+
+See [devflow-ai-project-idea.md](devflow-ai-project-idea.md) for the full product vision and
+[RESOURCES.md](RESOURCES.md) for the account/API setup + deployment checklist.
+
+## Highlights
+
+- **Deterministic logic and AI logic are kept separate.** Ticket-key correlation, webhook
+  auth, and event routing are plain code; the LLM (Groq) is only used for genuinely
+  judgment-shaped tasks — summarization, structured extraction, and natural-language answers.
+- **The AI layer degrades gracefully.** Every LLM call is wrapped so a Groq outage or bad
+  response never breaks the underlying feature — a PR still gets posted to Slack even if its
+  AI summary fails, with the failure fully logged, not swallowed.
+- **Human approval on the one AI action with real side effects.** Turning a Slack thread into
+  a Jira ticket shows an editable preview with Approve/Cancel buttons before anything is
+  created — the AI drafts, a person confirms.
+- **Webhook idempotency.** GitHub, Jira, and Slack all retry webhook deliveries on
+  timeout/non-2xx responses in production; duplicate deliveries are detected by provider
+  delivery ID and short-circuited before any Slack post, Jira write, or Groq call fires twice.
+- **Two real integration bugs, fixed for real:** Slack's 3-second interaction timeout required
+  redesigning the Jira-ticket flow to ack immediately and follow up via `response_url`; a
+  reasoning-model token-starvation bug (Groq's `gpt-oss` spending its entire token budget on
+  hidden reasoning and returning empty content) was fixed with `reasoning_effort: "low"`.
+- **Tested at the right layer.** Prompt-construction and job/step-filtering logic is unit
+  tested directly (mocking only the LLM call), while webhook integration tests cover full
+  request→Slack/Jira round trips with all outbound HTTP mocked via `respx` — 65 tests, no
+  live credentials needed, running in CI on every push.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    GH[GitHub] -->|PR & workflow events| API
+    JIRA[Jira Cloud] -->|status change events| API
+    SLACK1[Slack] -->|commands, mentions, button clicks| API
+
+    API[DevFlow API\nFastAPI + Postgres] --> GROQ[Groq LLM\nsummarize / extract / explain]
+    GROQ --> API
+    API --> SLACK2[Slack\nnotifications & replies]
+    API --> JIRAOUT[Jira\nticket creation]
+    API --> DASH[Dashboard\nevents + ticket timeline]
+```
 
 ## Setup
 
@@ -35,8 +74,9 @@ app/
   main.py            FastAPI app + router registration
   config.py          Settings loaded from .env
   db.py              Async SQLAlchemy engine/session
-  models.py          events, pull_requests, workflow_runs, issues, notifications
+  models.py          events, pull_requests, workflow_runs, issues, processed_deliveries
   security.py        GitHub HMAC + Slack signature verification
+  idempotency.py      Webhook delivery dedup (see "Reliability" below)
   correlation.py      Ticket-key extraction (branch/title/commit -> AITENDER-2445)
   integrations/       Thin HTTP clients for GitHub, Jira, Slack, Groq APIs
   webhooks/           Webhook route handlers per source
@@ -64,14 +104,17 @@ delivery returns `{"status": "duplicate"}` immediately, without re-posting to Sl
 Jira tickets, or re-calling Groq — this matters because GitHub and Slack both retry webhook
 deliveries on timeout/non-2xx responses in production.
 
-## Known Phase 1 simplifications
+## Known limitations
 
 - Events are processed inline in the webhook request, not via a queue/worker (Redis/Celery
-  is a Phase 4 reliability addition).
+  would be the next step for retry/backoff/DLQ semantics at higher volume).
 - `pull_requests` / `workflow_runs` are append-only history rows rather than upserted by
   `(repo, number)` — simplest for now, revisit if "current status" queries need it.
 - Jira webhook auth is a shared-secret query token, since Jira Cloud's built-in webhook UI
   doesn't support custom signing.
+- No token/cost tracking on Groq calls, and no schema validation on the JSON the model
+  returns beyond a bare `json.loads` (a malformed response fails safely but isn't retried
+  with a stricter prompt).
 
 ## License
 
