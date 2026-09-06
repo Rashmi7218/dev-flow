@@ -9,7 +9,8 @@ Event-driven engineering workflow automation connecting GitHub, Jira, and Slack.
 Phase 1 (GitHub/Jira/Slack event wiring) is done: PR/workflow events from GitHub and status
 events from Jira are posted to Slack, and a Slack slash command creates Jira tickets. Phase 2
 (AI layer, via Groq) is done too: PR summaries, CI failure explanations, Slack thread → Jira
-ticket (with human approval), and natural-language ticket status queries via `@DevFlow`.
+ticket (with human approval), and natural-language ticket status queries via `@DevFlow`. Phase 3
+has started with a read-only web dashboard at `/dashboard`.
 
 ## Setup
 
@@ -22,6 +23,7 @@ ticket (with human approval), and natural-language ticket status queries via `@D
    `/webhooks/slack/events` / `/webhooks/slack/commands` respectively.
 4. Start Colima (Docker Desktop replacement): `colima start`. Then `docker compose up --build`
 5. Check `http://localhost:8000/health`.
+6. Browse recent events and per-ticket timelines at `http://localhost:8000/dashboard`.
 
 ## Layout
 
@@ -35,6 +37,8 @@ app/
   correlation.py      Ticket-key extraction (branch/title/commit -> AITENDER-2445)
   integrations/       Thin HTTP clients for GitHub, Jira, Slack, Groq APIs
   webhooks/           Webhook route handlers per source
+  dashboard.py        Read-only /dashboard page + /api/events, /api/tickets/{key}/timeline
+  static/dashboard.html  Dependency-free HTML/JS dashboard frontend
 ```
 
 ## Testing
