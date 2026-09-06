@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from urllib.parse import parse_qsl
 
@@ -11,6 +12,8 @@ from app.db import SessionLocal
 from app.integrations import groq_client, jira_client, slack_client
 from app.models import PullRequest, WorkflowRun
 from app.security import verify_slack_signature
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks/slack", tags=["slack"])
 
@@ -80,6 +83,7 @@ async def _answer_status_query(channel: str, thread_ts: str, ticket_key: str) ->
         jira_status = issue["fields"]["status"]["name"]
         jira_summary = issue["fields"]["summary"]
     except Exception:
+        logger.exception("Failed to fetch Jira issue %s", ticket_key)
         jira_status = None
         jira_summary = None
 
@@ -115,7 +119,7 @@ async def _answer_status_query(channel: str, thread_ts: str, ticket_key: str) ->
         lines.append("")
         lines.append(f"_{update}_")
     except Exception:
-        pass
+        logger.exception("Failed to generate status update phrasing for %s", ticket_key)
 
     await slack_client.post_message("\n".join(lines), channel=channel, thread_ts=thread_ts)
 
@@ -126,6 +130,7 @@ async def _propose_ticket_from_thread(channel: str, thread_ts: str) -> None:
         ticket = await groq_client.extract_ticket_from_thread(messages)
         thread_url = await slack_client.get_permalink(channel, thread_ts)
     except Exception:
+        logger.exception("Failed to build ticket proposal for thread %s", thread_ts)
         await slack_client.post_message(
             "Sorry, I couldn't generate a ticket from this thread.",
             channel=channel,
@@ -198,6 +203,7 @@ async def _create_thread_ticket_and_notify(ticket: dict, response_url: str) -> N
         url = f"{settings.jira_base_url}/browse/{issue['key']}"
         text = f"✅ Jira issue <{url}|{issue['key']}> created from this thread."
     except Exception:
+        logger.exception("Failed to create Jira ticket from thread: %s", ticket.get("title"))
         text = "❌ Failed to create the Jira ticket."
 
     async with httpx.AsyncClient() as client:
@@ -248,6 +254,7 @@ async def _create_issue_and_notify(summary: str, requester: str, response_url: s
             ],
         }
     except Exception:
+        logger.exception("Failed to create Jira issue for: %s", summary)
         payload = {
             "response_type": "ephemeral",
             "text": f"❌ Failed to create Jira issue for: {summary}",

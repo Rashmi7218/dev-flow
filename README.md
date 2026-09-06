@@ -1,13 +1,15 @@
 # DevFlow AI
 
+![CI](https://github.com/Rashmi7218/dev-flow/actions/workflows/ci.yml/badge.svg)
+
 Event-driven engineering workflow automation connecting GitHub, Jira, and Slack. See
 [devflow-ai-project-idea.md](devflow-ai-project-idea.md) for the full product vision and
 [RESOURCES.md](RESOURCES.md) for the account/API setup checklist.
 
 Phase 1 (GitHub/Jira/Slack event wiring) is done: PR/workflow events from GitHub and status
 events from Jira are posted to Slack, and a Slack slash command creates Jira tickets. Phase 2
-(AI layer, via Groq) has started: opened PRs get an AI-generated summary alongside the
-notification.
+(AI layer, via Groq) is done too: PR summaries, CI failure explanations, Slack thread → Jira
+ticket (with human approval), and natural-language ticket status queries via `@DevFlow`.
 
 ## Setup
 
@@ -34,6 +36,17 @@ app/
   integrations/       Thin HTTP clients for GitHub, Jira, Slack, Groq APIs
   webhooks/           Webhook route handlers per source
 ```
+
+## Testing
+
+```
+pip install -r requirements-dev.txt
+pytest -v
+```
+
+Tests run against an in-memory SQLite DB and mock all outbound HTTP (GitHub, Jira, Slack, Groq)
+via `respx` — no live credentials or Docker needed. CI (`.github/workflows/ci.yml`) runs this
+suite on every push/PR.
 
 ## Known Phase 1 simplifications
 

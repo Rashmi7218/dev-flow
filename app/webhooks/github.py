@@ -1,4 +1,5 @@
 import json
+import logging
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,8 @@ from app.db import get_db
 from app.integrations import github_client, groq_client, slack_client
 from app.models import Event, PullRequest, WorkflowRun
 from app.security import verify_github_signature
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks/github", tags=["github"])
 
@@ -70,7 +73,7 @@ async def _handle_pull_request(db: AsyncSession, payload: dict) -> None:
             summary = await groq_client.summarize_pr(pr["title"], pr.get("body"), files)
             text += f"\n\n*Summary:* {summary}"
         except Exception:
-            pass
+            logger.exception("Failed to generate PR summary for %s#%s", repo, pr["number"])
         await slack_client.post_message(text)
     elif pr.get("merged"):
         await slack_client.post_message(
@@ -121,6 +124,6 @@ async def _handle_workflow_run(db: AsyncSession, payload: dict) -> None:
                 f"\n*Suggested action:* {explanation['suggested_action']}"
             )
         except Exception:
-            pass
+            logger.exception("Failed to generate failure explanation for %s run %s", repo, run["id"])
 
     await slack_client.post_message(text)

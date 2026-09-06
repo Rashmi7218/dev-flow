@@ -1,0 +1,203 @@
+import hashlib
+import hmac
+import json
+
+import respx
+from httpx import Response
+
+from app.config import settings
+
+
+def _sign(body: bytes) -> str:
+    return "sha256=" + hmac.new(
+        settings.github_webhook_secret.encode(), body, hashlib.sha256
+    ).hexdigest()
+
+
+def _pr_payload(action: str, merged: bool = False) -> dict:
+    return {
+        "action": action,
+        "repository": {"full_name": "acme/widgets"},
+        "pull_request": {
+            "number": 42,
+            "title": "KAN-1 add login",
+            "body": "",
+            "html_url": "https://github.com/acme/widgets/pull/42",
+            "merged": merged,
+            "user": {"login": "octocat"},
+            "head": {"ref": "feature/KAN-1-login"},
+        },
+    }
+
+
+async def test_missing_signature_rejected(client):
+    resp = await client.post("/webhooks/github", content=b"{}")
+    assert resp.status_code == 401
+
+
+async def test_invalid_signature_rejected(client):
+    body = json.dumps(_pr_payload("opened")).encode()
+    resp = await client.post(
+        "/webhooks/github",
+        content=body,
+        headers={"X-GitHub-Event": "pull_request", "X-Hub-Signature-256": "sha256=deadbeef"},
+    )
+    assert resp.status_code == 401
+
+
+@respx.mock
+async def test_pull_request_opened_posts_summary_to_slack(client):
+    respx.get("https://api.github.com/repos/acme/widgets/pulls/42/files").mock(
+        return_value=Response(200, json=[{"filename": "a.py", "additions": 5, "deletions": 1}])
+    )
+    respx.post("https://api.groq.com/openai/v1/chat/completions").mock(
+        return_value=Response(
+            200,
+            json={"choices": [{"message": {"content": "Adds a login button."}}]},
+        )
+    )
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = json.dumps(_pr_payload("opened")).encode()
+    resp = await client.post(
+        "/webhooks/github",
+        content=body,
+        headers={"X-GitHub-Event": "pull_request", "X-Hub-Signature-256": _sign(body)},
+    )
+
+    assert resp.status_code == 200
+    assert slack_route.called
+    sent_text = json.loads(slack_route.calls.last.request.content)["text"]
+    assert "PR Opened" in sent_text
+    assert "Adds a login button." in sent_text
+
+
+@respx.mock
+async def test_pull_request_opened_degrades_gracefully_if_groq_fails(client):
+    respx.get("https://api.github.com/repos/acme/widgets/pulls/42/files").mock(
+        return_value=Response(200, json=[])
+    )
+    respx.post("https://api.groq.com/openai/v1/chat/completions").mock(return_value=Response(500))
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = json.dumps(_pr_payload("opened")).encode()
+    resp = await client.post(
+        "/webhooks/github",
+        content=body,
+        headers={"X-GitHub-Event": "pull_request", "X-Hub-Signature-256": _sign(body)},
+    )
+
+    assert resp.status_code == 200
+    sent_text = json.loads(slack_route.calls.last.request.content)["text"]
+    assert "PR Opened" in sent_text
+    assert "Summary" not in sent_text
+
+
+@respx.mock
+async def test_pull_request_merged_posts_to_slack(client):
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = json.dumps(_pr_payload("closed", merged=True)).encode()
+    resp = await client.post(
+        "/webhooks/github",
+        content=body,
+        headers={"X-GitHub-Event": "pull_request", "X-Hub-Signature-256": _sign(body)},
+    )
+
+    assert resp.status_code == 200
+    sent_text = json.loads(slack_route.calls.last.request.content)["text"]
+    assert "PR Merged" in sent_text
+
+
+def _workflow_run_payload(conclusion: str) -> dict:
+    return {
+        "action": "completed",
+        "repository": {"full_name": "acme/widgets"},
+        "workflow_run": {
+            "id": 999,
+            "name": "CI",
+            "status": "completed",
+            "conclusion": conclusion,
+            "html_url": "https://github.com/acme/widgets/actions/runs/999",
+            "head_branch": "feature/KAN-1-login",
+            "display_title": "KAN-1 add login",
+        },
+    }
+
+
+@respx.mock
+async def test_workflow_run_failure_includes_explanation(client):
+    respx.get("https://api.github.com/repos/acme/widgets/actions/runs/999/jobs").mock(
+        return_value=Response(
+            200,
+            json={
+                "jobs": [
+                    {
+                        "name": "test",
+                        "conclusion": "failure",
+                        "steps": [{"name": "Run tests", "conclusion": "failure"}],
+                    }
+                ]
+            },
+        )
+    )
+    respx.post("https://api.groq.com/openai/v1/chat/completions").mock(
+        return_value=Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "summary": "Tests failed.",
+                                    "likely_cause": "A test assertion failed.",
+                                    "failed_stage": "Run tests",
+                                    "suggested_action": "Check the test output.",
+                                }
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+    )
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = json.dumps(_workflow_run_payload("failure")).encode()
+    resp = await client.post(
+        "/webhooks/github",
+        content=body,
+        headers={"X-GitHub-Event": "workflow_run", "X-Hub-Signature-256": _sign(body)},
+    )
+
+    assert resp.status_code == 200
+    sent_text = json.loads(slack_route.calls.last.request.content)["text"]
+    assert "Failed" in sent_text
+    assert "Run tests" in sent_text
+
+
+@respx.mock
+async def test_workflow_run_success_has_no_explanation_call(client):
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = json.dumps(_workflow_run_payload("success")).encode()
+    resp = await client.post(
+        "/webhooks/github",
+        content=body,
+        headers={"X-GitHub-Event": "workflow_run", "X-Hub-Signature-256": _sign(body)},
+    )
+
+    assert resp.status_code == 200
+    sent_text = json.loads(slack_route.calls.last.request.content)["text"]
+    assert "Succeeded" in sent_text

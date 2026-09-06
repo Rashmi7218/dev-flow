@@ -2,6 +2,7 @@ from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import StaticPool
 
 from app.config import settings
 
@@ -10,7 +11,12 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_async_engine(settings.database_url, echo=False)
+_engine_kwargs = {}
+if settings.database_url.startswith("sqlite"):
+    # Keep a single shared in-memory DB across the connection pool (used in tests).
+    _engine_kwargs = {"poolclass": StaticPool, "connect_args": {"check_same_thread": False}}
+
+engine = create_async_engine(settings.database_url, echo=False, **_engine_kwargs)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
