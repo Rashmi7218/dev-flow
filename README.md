@@ -82,18 +82,97 @@ suggested next action, not just a red X
 6. Browse recent events and per-ticket timelines at `http://localhost:8000/dashboard` — this
    (and everything under `/api/`) is gated by HTTP Basic Auth using the `ADMIN_USERNAME` /
    `ADMIN_PASSWORD` values from your `.env`.
-7. Install the GitHub App on each repo you want DevFlow to track — the dashboard's "Repo
-   Routing" card has a "Manage GitHub App installation" link straight to GitHub's install page,
-   so this is the only per-repo step left (no more manual per-repo webhook forms).
-8. If the org has multiple repos, use the "Repo Routing" section on the dashboard to bind each
-   repo to a Jira project key and one or more Slack channel IDs — see "Multi-repo routing"
-   below.
+7. Now connect GitHub repos, Jira projects, and Slack channels to each other — see "Connecting
+   GitHub, Jira, and Slack" below.
 
 For an always-on public deployment instead of local + ngrok, see "Deployment (Render)" in
 [RESOURCES.md](RESOURCES.md) — `render.yaml` provisions the whole stack from one file.
 
 For the full feature inventory, architecture, and known-limitations reference, see
 [DEVELOPERS.md](DEVELOPERS.md).
+
+## Connecting GitHub, Jira, and Slack
+
+Three separate accounts, three separate one-time setups, then a per-repo binding step that ties
+them together. It's easy to do one of these and assume the others followed automatically — they
+don't. This section is the full picture.
+
+### The moving parts
+
+```mermaid
+flowchart TB
+    subgraph GitHub
+        APP["GitHub App\n(one per org, created once)"]
+        R1["repo: org/repo-a"]
+        R2["repo: org/repo-b"]
+        APP -->|installed on| R1
+        APP -->|installed on| R2
+    end
+
+    subgraph DevFlow["DevFlow dashboard — Repo Routing"]
+        B1["repo-a bound to:\nJira project ABC\nSlack #channel-a"]
+        B2["repo-b bound to:\nJira project XYZ\nSlack #channel-b"]
+    end
+
+    subgraph Jira["Jira Cloud"]
+        P1["Project ABC"]
+        P2["Project XYZ"]
+    end
+
+    subgraph Slack["Slack workspace"]
+        C1["#channel-a\n(bot invited)"]
+        C2["#channel-b\n(bot invited)"]
+    end
+
+    R1 -.events flow through App webhook.-> B1
+    R2 -.events flow through App webhook.-> B2
+    B1 --> P1
+    B1 --> C1
+    B2 --> P2
+    B2 --> C2
+```
+
+Four independent things determine whether a repo's events actually reach the right place, and
+**all four** are required — missing any one is exactly the kind of silent gap that's easy to hit:
+
+1. **GitHub App installed on the repo.** No install → no events reach DevFlow at all (check via
+   the App's **Advanced → Recent Deliveries** — see "Troubleshooting" below).
+2. **Repo → Jira project binding** (dashboard "Repo Routing" → "Jira project per repo"). Without
+   it, tickets created from this repo's Slack channel fall back to the deployment's default
+   `JIRA_PROJECT_KEY`.
+3. **Repo → Slack channel binding** (dashboard "Repo Routing" → "Slack channel bindings"). This
+   is a *separate* binding from the Jira one above — binding the Jira project does not bind a
+   Slack channel, and vice versa. Without a channel binding, notifications fall back to
+   `SLACK_DEFAULT_CHANNEL`.
+4. **The DevFlow bot invited to that Slack channel.** A binding pointing at a channel the bot
+   hasn't joined fails outright (`not_in_channel`) rather than silently going nowhere.
+
+### Onboarding a new repo — checklist
+
+| # | Where | What to do |
+|---|-------|------------|
+| 1 | GitHub | Install the App on the repo — dashboard "Repo Routing" card → "Manage GitHub App installation ↗" → pick the repo (or confirm it's covered by "All repositories"). |
+| 2 | Jira | Have (or create) a project for this repo, note its project key (e.g. `KAN`, `WID`) — Jira Admin → Projects, or create one straight from the "Create project" button. |
+| 3 | Slack | Decide which channel should get this repo's notifications. Copy its **channel ID** (open the channel → channel name → "View channel details" → scroll down → "Copy channel ID", *not* the channel name — `chat.postMessage` needs the ID, something like `C0123456`). |
+| 4 | Slack | Invite the bot to that channel: `/invite @DevFlow`. |
+| 5 | DevFlow dashboard → Repo Routing | Under "Jira project per repo": add `owner/repo` → the project key from step 2. |
+| 6 | DevFlow dashboard → Repo Routing | Under "Slack channel bindings": add `owner/repo` → the channel ID from step 3. |
+| 7 | Verify | Open a test PR on the repo and confirm the notification lands in the channel you just bound — check that *specific* channel, not whichever one you assumed. Channel IDs (`C0123456`) don't read as channel names, so it's easy to check the wrong one. |
+
+### Troubleshooting
+
+- **Nothing in Slack, and the delivery in GitHub shows a red ❌ / 500**: almost always the bot
+  isn't in the bound channel (or the fallback `SLACK_DEFAULT_CHANNEL`) — Slack's API error is
+  `not_in_channel`. Invite the bot and redeliver.
+- **Nothing in Slack, but the delivery shows a green ✅ / 200**: the message was sent somewhere
+  successfully — you're likely looking at the wrong channel. Re-check exactly which channel ID
+  this repo is bound to in "Repo Routing", and look there specifically.
+- **No delivery shows up in GitHub at all**: the App probably isn't installed on that repo —
+  check `github.com/settings/apps/<your-app-slug>` → **Advanced** tab → **Recent Deliveries**
+  (this is different from a classic repo-level webhook's own "Recent Deliveries" tab, if you
+  still have an old one of those lying around from before this project switched to a GitHub
+  App — delete it, otherwise you'll get duplicate notifications from two separate webhooks
+  firing on the same event).
 
 ## Layout
 
@@ -108,7 +187,7 @@ app/
   auth.py            HTTP Basic Auth dependency for the dashboard/admin API
   idempotency.py      Webhook delivery dedup (see "Reliability" below)
   correlation.py      Ticket-key extraction (branch/title/commit -> KAN-42)
-  routing.py          Repo <-> Jira project / Slack channel lookups (see "Multi-repo routing")
+  routing.py          Repo <-> Jira project / Slack channel lookups (see "Connecting GitHub, Jira, and Slack")
   integrations/       Thin HTTP clients for GitHub, Jira, Slack, Groq APIs
   integrations/github_auth.py  GitHub App JWT + installation-token exchange (cached)
   webhooks/           Webhook route handlers per source
@@ -116,24 +195,6 @@ app/
   admin.py            /api/admin/repos, /api/admin/bindings CRUD (auth required)
   static/dashboard.html  Dependency-free HTML/JS dashboard + admin frontend
 ```
-
-## Multi-repo routing
-
-By default every event notifies the single `SLACK_DEFAULT_CHANNEL` and every ticket DevFlow
-creates goes to the single `JIRA_PROJECT_KEY`. For an org with multiple repos and channels, use
-the dashboard's "Repo Routing" section (`app/admin.py`, `app/routing.py`) to configure, per
-repo:
-
-- a **Jira project key** (`repo_configs` table) — used both for events arriving from that repo
-  and for tickets created from a Slack channel bound to it.
-- one or more **Slack channel IDs** (`channel_bindings` table) — GitHub/Jira events for that
-  repo fan out to every bound channel.
-
-A repo/channel with no configuration falls back to the global defaults, so nothing goes silent
-just because it hasn't been onboarded yet. If a Slack channel is bound to more than one repo,
-ticket-creation flows (`/devflow create`, thread → ticket) resolve the Jira project from
-whichever repo was bound first and log a warning — per-channel disambiguation when multiple
-repos share a channel is a known gap, not yet built.
 
 ## Testing
 
@@ -172,7 +233,8 @@ deliveries on timeout/non-2xx responses in production.
   from a list of channels the bot has joined — a `conversations.list`-backed picker is future
   work, not built in this pass.
 - A Slack channel bound to multiple repos can't be disambiguated for ticket-creation flows; the
-  first bound repo's Jira project is used and a warning is logged (see "Multi-repo routing").
+  first bound repo's Jira project is used and a warning is logged (see "Connecting GitHub,
+  Jira, and Slack").
 - The GitHub App's installation-token cache (`app/integrations/github_auth.py`) is in-process
   only — fine for the single-instance deployment this project runs as, but wouldn't be safe
   shared across multiple replicas without moving it to Redis/similar.
