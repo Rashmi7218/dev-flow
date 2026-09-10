@@ -6,13 +6,14 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_admin
 from app.db import get_db
 from app.integrations import jira_client
 from app.models import Event, Issue, PullRequest, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["dashboard"])
+router = APIRouter(tags=["dashboard"], dependencies=[Depends(require_admin)])
 
 _DASHBOARD_HTML = (Path(__file__).parent / "static" / "dashboard.html").read_text()
 

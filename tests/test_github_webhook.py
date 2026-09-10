@@ -6,6 +6,8 @@ import respx
 from httpx import Response
 
 from app.config import settings
+from app.db import SessionLocal
+from app.models import ChannelBinding
 
 
 def _sign(body: bytes) -> str:
@@ -138,6 +140,40 @@ async def test_pull_request_opened_degrades_gracefully_if_groq_fails(client):
     sent_text = json.loads(slack_route.calls.last.request.content)["text"]
     assert "PR Opened" in sent_text
     assert "Summary" not in sent_text
+
+
+@respx.mock
+async def test_pull_request_opened_fans_out_to_bound_channels(client):
+    async with SessionLocal() as db:
+        db.add_all(
+            [
+                ChannelBinding(repo="acme/widgets", slack_channel="C111"),
+                ChannelBinding(repo="acme/widgets", slack_channel="C222"),
+            ]
+        )
+        await db.commit()
+
+    respx.get("https://api.github.com/repos/acme/widgets/pulls/42/files").mock(
+        return_value=Response(200, json=[])
+    )
+    respx.post("https://api.groq.com/openai/v1/chat/completions").mock(return_value=Response(500))
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = json.dumps(_pr_payload("opened")).encode()
+    resp = await client.post(
+        "/webhooks/github",
+        content=body,
+        headers={"X-GitHub-Event": "pull_request", "X-Hub-Signature-256": _sign(body)},
+    )
+
+    assert resp.status_code == 200
+    assert slack_route.call_count == 2
+    sent_channels = {
+        json.loads(call.request.content)["channel"] for call in slack_route.calls
+    }
+    assert sent_channels == {"C111", "C222"}
 
 
 @respx.mock

@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
+from app.admin import router as admin_router
 from app.dashboard import router as dashboard_router
 from app.db import init_db
 from app.webhooks import github, jira, slack
@@ -25,6 +26,7 @@ app.include_router(github.router)
 app.include_router(jira.router)
 app.include_router(slack.router)
 app.include_router(dashboard_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")

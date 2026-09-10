@@ -34,5 +34,8 @@ class Settings(BaseSettings):
     groq_api_key: str
     groq_model: str = "openai/gpt-oss-120b"
 
+    admin_username: str
+    admin_password: str
+
 
 settings = Settings()

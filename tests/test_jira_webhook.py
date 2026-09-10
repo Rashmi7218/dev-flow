@@ -4,6 +4,8 @@ import respx
 from httpx import Response
 
 from app.config import settings
+from app.db import SessionLocal
+from app.models import ChannelBinding, RepoConfig
 
 
 def _issue_payload(status: str = "In Progress", status_changed: bool = True) -> dict:
@@ -55,6 +57,27 @@ async def test_status_change_posts_to_slack(client):
     sent_text = json.loads(slack_route.calls.last.request.content)["text"]
     assert "KAN-1" in sent_text
     assert "In Progress" in sent_text
+
+
+@respx.mock
+async def test_status_change_posts_to_channel_bound_via_jira_project(client):
+    async with SessionLocal() as db:
+        db.add(RepoConfig(repo="acme/widgets", jira_project_key="KAN"))
+        db.add(ChannelBinding(repo="acme/widgets", slack_channel="C333"))
+        await db.commit()
+
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    resp = await client.post(
+        f"/webhooks/jira?token={settings.jira_webhook_token}",
+        content=json.dumps(_issue_payload(status="In Progress")),
+    )
+
+    assert resp.status_code == 200
+    sent = json.loads(slack_route.calls.last.request.content)
+    assert sent["channel"] == "C333"
 
 
 @respx.mock

@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import JSON, BigInteger, DateTime, String, func
+from sqlalchemy import JSON, BigInteger, DateTime, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -80,5 +80,28 @@ class Notification(Base):
     message: Mapped[str] = mapped_column(String(2000))
     ticket_key: Mapped[str | None] = mapped_column(String(50), nullable=True)
     sent_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class RepoConfig(Base):
+    __tablename__ = "repo_configs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    repo: Mapped[str] = mapped_column(String(200), unique=True)
+    jira_project_key: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ChannelBinding(Base):
+    __tablename__ = "channel_bindings"
+    __table_args__ = (UniqueConstraint("repo", "slack_channel"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    repo: Mapped[str] = mapped_column(String(200))
+    slack_channel: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

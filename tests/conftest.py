@@ -11,6 +11,8 @@ os.environ.setdefault("SLACK_BOT_TOKEN", "xoxb-test")
 os.environ.setdefault("SLACK_SIGNING_SECRET", "test-slack-signing-secret")
 os.environ.setdefault("GROQ_API_KEY", "test-groq-key")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("ADMIN_USERNAME", "admin")
+os.environ.setdefault("ADMIN_PASSWORD", "test-admin-password")
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -32,4 +34,12 @@ async def _reset_db():
 async def client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def admin_client():
+    transport = ASGITransport(app=app)
+    auth = (os.environ["ADMIN_USERNAME"], os.environ["ADMIN_PASSWORD"])
+    async with AsyncClient(transport=transport, base_url="http://test", auth=auth) as ac:
         yield ac

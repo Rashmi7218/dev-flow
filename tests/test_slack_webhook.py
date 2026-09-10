@@ -8,6 +8,8 @@ import respx
 from httpx import Response
 
 from app.config import settings
+from app.db import SessionLocal
+from app.models import ChannelBinding, RepoConfig
 
 
 def _slack_headers(body: bytes, timestamp: int | None = None) -> dict:
@@ -84,6 +86,36 @@ async def test_command_create_acks_immediately_and_creates_issue_in_background(c
     assert response_url_route.called
     sent = json.loads(response_url_route.calls.last.request.content)
     assert "TEST-1" in sent["text"]
+
+
+@respx.mock
+async def test_command_create_uses_jira_project_bound_to_channel(client):
+    async with SessionLocal() as db:
+        db.add(RepoConfig(repo="acme/widgets", jira_project_key="WID"))
+        db.add(ChannelBinding(repo="acme/widgets", slack_channel="C999"))
+        await db.commit()
+
+    jira_route = respx.post("https://test.atlassian.net/rest/api/3/issue").mock(
+        return_value=Response(200, json={"key": "WID-1"})
+    )
+    respx.post("https://hooks.slack.test/reply").mock(return_value=Response(200, json={"ok": True}))
+
+    body = urlencode(
+        {
+            "text": "create fix the login bug",
+            "response_url": "https://hooks.slack.test/reply",
+            "user_name": "alice",
+            "channel_id": "C999",
+        }
+    ).encode()
+    resp = await client.post(
+        "/webhooks/slack/commands", content=body, headers=_slack_headers(body)
+    )
+
+    assert resp.status_code == 200
+    assert jira_route.called
+    sent_fields = json.loads(jira_route.calls.last.request.content)["fields"]
+    assert sent_fields["project"]["key"] == "WID"
 
 
 @respx.mock
@@ -266,6 +298,45 @@ async def test_interaction_approve_creates_ticket(client):
     assert response_url_route.called
     sent = json.loads(response_url_route.calls.last.request.content)
     assert "TEST-9" in sent["text"]
+
+
+@respx.mock
+async def test_interaction_approve_uses_jira_project_bound_to_channel(client):
+    async with SessionLocal() as db:
+        db.add(RepoConfig(repo="acme/widgets", jira_project_key="WID"))
+        db.add(ChannelBinding(repo="acme/widgets", slack_channel="C123"))
+        await db.commit()
+
+    jira_route = respx.post("https://test.atlassian.net/rest/api/3/issue").mock(
+        return_value=Response(200, json={"key": "WID-2"})
+    )
+    respx.post("https://hooks.slack.test/reply3").mock(return_value=Response(200, json={"ok": True}))
+
+    ticket = {
+        "title": "Login 500 error",
+        "description": "Login fails.",
+        "steps_to_reproduce": "Try logging in.",
+        "expected_behavior": "Login succeeds.",
+        "actual_behavior": "500 error.",
+        "severity": "High",
+        "suggested_assignee": "Backend team",
+        "thread_url": "https://slack.com/p1",
+    }
+    interaction_payload = {
+        "type": "block_actions",
+        "response_url": "https://hooks.slack.test/reply3",
+        "channel": {"id": "C123"},
+        "actions": [{"action_id": "approve_ticket", "value": json.dumps(ticket)}],
+    }
+    body = urlencode({"payload": json.dumps(interaction_payload)}).encode()
+    resp = await client.post(
+        "/webhooks/slack/interactions", content=body, headers=_slack_headers(body)
+    )
+
+    assert resp.status_code == 200
+    assert jira_route.called
+    sent_fields = json.loads(jira_route.calls.last.request.content)["fields"]
+    assert sent_fields["project"]["key"] == "WID"
 
 
 async def test_interaction_cancel_replaces_message_without_creating_ticket(client):

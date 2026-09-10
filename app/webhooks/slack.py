@@ -13,6 +13,7 @@ from app.db import SessionLocal, get_db
 from app.idempotency import is_duplicate_delivery
 from app.integrations import groq_client, jira_client, slack_client
 from app.models import PullRequest, WorkflowRun
+from app.routing import jira_project_for_channel
 from app.security import verify_slack_signature
 
 logger = logging.getLogger(__name__)
@@ -202,11 +203,14 @@ def _build_description(ticket: dict) -> str:
     )
 
 
-async def _create_thread_ticket_and_notify(ticket: dict, response_url: str) -> None:
+async def _create_thread_ticket_and_notify(channel: str, ticket: dict, response_url: str) -> None:
     try:
+        async with SessionLocal() as db:
+            project_key = await jira_project_for_channel(db, channel)
         issue = await jira_client.create_issue(
             summary=ticket["title"],
             description=_build_description(ticket),
+            project_key=project_key,
         )
         url = f"{settings.jira_base_url}/browse/{issue['key']}"
         text = f"✅ Jira issue <{url}|{issue['key']}> created from this thread."
@@ -228,10 +232,11 @@ async def handle_slack_interaction(
     action = (payload.get("actions") or [{}])[0]
     action_id = action.get("action_id")
     response_url = payload.get("response_url", "")
+    channel = payload.get("channel", {}).get("id", "")
 
     if action_id == "approve_ticket":
         ticket = json.loads(action.get("value", "{}"))
-        background_tasks.add_task(_create_thread_ticket_and_notify, ticket, response_url)
+        background_tasks.add_task(_create_thread_ticket_and_notify, channel, ticket, response_url)
         return {"replace_original": True, "text": "Creating Jira ticket..."}
 
     if action_id == "cancel_ticket":
@@ -240,9 +245,15 @@ async def handle_slack_interaction(
     return {"status": "ignored"}
 
 
-async def _create_issue_and_notify(summary: str, requester: str, response_url: str) -> None:
+async def _create_issue_and_notify(
+    channel: str, summary: str, requester: str, response_url: str
+) -> None:
     try:
-        issue = await jira_client.create_issue(summary=summary, description=summary)
+        async with SessionLocal() as db:
+            project_key = await jira_project_for_channel(db, channel)
+        issue = await jira_client.create_issue(
+            summary=summary, description=summary, project_key=project_key
+        )
         url = f"{settings.jira_base_url}/browse/{issue['key']}"
         payload = {
             "response_type": "in_channel",
@@ -281,11 +292,12 @@ async def handle_slack_command(
     text = form.get("text", "").strip()
     response_url = form.get("response_url", "")
     requester = form.get("user_name", "someone")
+    channel = form.get("channel_id", "")
 
     parts = text.split(maxsplit=1)
     if len(parts) < 2 or parts[0] != "create":
         return {"response_type": "ephemeral", "text": "Usage: /devflow create <summary>"}
 
     summary = parts[1].strip()
-    background_tasks.add_task(_create_issue_and_notify, summary, requester, response_url)
+    background_tasks.add_task(_create_issue_and_notify, channel, summary, requester, response_url)
     return {"response_type": "ephemeral", "text": f"Creating Jira issue for: {summary}..."}

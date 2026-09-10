@@ -175,6 +175,15 @@
   .timeline-item .detail { color: var(--muted); font-size: 12px; margin-top: 2px; }
   .timeline-item .ts { color: var(--muted); font-size: 11px; margin-top: 2px; }
   .empty, .error { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  .remove-btn {
+    font-size: 11px;
+    color: var(--fail);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+  }
+  .remove-btn:hover { text-decoration: underline; }
   .error { color: var(--fail); }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
@@ -219,6 +228,36 @@
         <tr><th>Time</th><th>Source</th><th>Event</th><th>Ticket</th></tr>
       </thead>
       <tbody id="events-body"></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Repo Routing</h2>
+    <p class="empty" style="padding-top: 0;">
+      Configure which Jira project each repo files tickets into, and which Slack channel(s)
+      it notifies. Unconfigured repos fall back to the deployment's default project/channel.
+    </p>
+
+    <h3 style="font-size:13px; margin: 4px 0 8px;">Jira project per repo</h3>
+    <div class="ticket-search">
+      <input id="repo-config-repo" placeholder="org/repo" autocomplete="off">
+      <input id="repo-config-project" placeholder="Jira project key (e.g. WID)" autocomplete="off">
+      <button id="repo-config-add">Save</button>
+    </div>
+    <table>
+      <thead><tr><th>Repo</th><th>Jira Project</th><th></th></tr></thead>
+      <tbody id="repo-configs-body"></tbody>
+    </table>
+
+    <h3 style="font-size:13px; margin: 20px 0 8px;">Slack channel bindings</h3>
+    <div class="ticket-search">
+      <input id="binding-repo" placeholder="org/repo" autocomplete="off">
+      <input id="binding-channel" placeholder="Slack channel ID (e.g. C0123456)" autocomplete="off">
+      <button id="binding-add">Add</button>
+    </div>
+    <table>
+      <thead><tr><th>Repo</th><th>Slack Channel</th><th></th></tr></thead>
+      <tbody id="bindings-body"></tbody>
     </table>
   </section>
 </main>
@@ -377,8 +416,90 @@ document.getElementById('filter-ticket').addEventListener('input', () => {
   filterDebounce = setTimeout(loadEvents, 400);
 });
 
+async function loadRepoConfigs() {
+  const tbody = document.getElementById('repo-configs-body');
+  try {
+    const resp = await fetch('/api/admin/repos');
+    const rows = await resp.json();
+    tbody.innerHTML = rows.length
+      ? rows.map(r => `
+        <tr>
+          <td>${r.repo}</td>
+          <td>${r.jira_project_key}</td>
+          <td><button class="remove-btn" data-kind="repo" data-id="${r.id}">Remove</button></td>
+        </tr>
+      `).join('')
+      : '<tr><td colspan="3" class="empty">No repos configured — using the default Jira project.</td></tr>';
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="3" class="error">Failed to load repo configs.</td></tr>';
+  }
+}
+
+async function loadBindings() {
+  const tbody = document.getElementById('bindings-body');
+  try {
+    const resp = await fetch('/api/admin/bindings');
+    const rows = await resp.json();
+    tbody.innerHTML = rows.length
+      ? rows.map(b => `
+        <tr>
+          <td>${b.repo}</td>
+          <td>${b.slack_channel}</td>
+          <td><button class="remove-btn" data-kind="binding" data-id="${b.id}">Remove</button></td>
+        </tr>
+      `).join('')
+      : '<tr><td colspan="3" class="empty">No channel bindings — using the default Slack channel.</td></tr>';
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="3" class="error">Failed to load channel bindings.</td></tr>';
+  }
+}
+
+document.getElementById('repo-config-add').addEventListener('click', async () => {
+  const repo = document.getElementById('repo-config-repo').value.trim();
+  const jira_project_key = document.getElementById('repo-config-project').value.trim();
+  if (!repo || !jira_project_key) return;
+  await fetch('/api/admin/repos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo, jira_project_key }),
+  });
+  document.getElementById('repo-config-repo').value = '';
+  document.getElementById('repo-config-project').value = '';
+  loadRepoConfigs();
+});
+
+document.getElementById('binding-add').addEventListener('click', async () => {
+  const repo = document.getElementById('binding-repo').value.trim();
+  const slack_channel = document.getElementById('binding-channel').value.trim();
+  if (!repo || !slack_channel) return;
+  await fetch('/api/admin/bindings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo, slack_channel }),
+  });
+  document.getElementById('binding-repo').value = '';
+  document.getElementById('binding-channel').value = '';
+  loadBindings();
+});
+
+document.getElementById('repo-configs-body').addEventListener('click', async (e) => {
+  if (e.target.dataset.kind === 'repo') {
+    await fetch(`/api/admin/repos/${e.target.dataset.id}`, { method: 'DELETE' });
+    loadRepoConfigs();
+  }
+});
+
+document.getElementById('bindings-body').addEventListener('click', async (e) => {
+  if (e.target.dataset.kind === 'binding') {
+    await fetch(`/api/admin/bindings/${e.target.dataset.id}`, { method: 'DELETE' });
+    loadBindings();
+  }
+});
+
 loadEvents();
 loadRecentTickets();
+loadRepoConfigs();
+loadBindings();
 setInterval(loadEvents, 10000);
 setInterval(loadRecentTickets, 30000);
 </script>

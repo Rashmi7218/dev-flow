@@ -7,6 +7,7 @@ from app.db import get_db
 from app.idempotency import is_duplicate_delivery
 from app.integrations import slack_client
 from app.models import Event, Issue
+from app.routing import channels_for_jira_project
 
 router = APIRouter(prefix="/webhooks/jira", tags=["jira"])
 
@@ -51,6 +52,8 @@ async def handle_jira_webhook(
     changelog = payload.get("changelog", {})
     status_changed = any(item.get("field") == "status" for item in changelog.get("items", []))
     if status_changed:
-        await slack_client.post_message(f"{key} — Status Updated\n\nNew Status: {status}")
+        text = f"{key} — Status Updated\n\nNew Status: {status}"
+        for channel in await channels_for_jira_project(db, project):
+            await slack_client.post_message(text, channel=channel)
 
     return {"status": "accepted"}

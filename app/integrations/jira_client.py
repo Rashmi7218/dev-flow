@@ -26,10 +26,15 @@ async def get_issue(key: str) -> dict:
         return resp.json()
 
 
-async def create_issue(summary: str, description: str, issue_type: str = "Task") -> dict:
+async def create_issue(
+    summary: str,
+    description: str,
+    issue_type: str = "Task",
+    project_key: str | None = None,
+) -> dict:
     payload = {
         "fields": {
-            "project": {"key": settings.jira_project_key},
+            "project": {"key": project_key or settings.jira_project_key},
             "summary": summary,
             "description": _doc(description),
             "issuetype": {"name": issue_type},

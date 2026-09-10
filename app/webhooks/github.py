@@ -9,6 +9,7 @@ from app.db import get_db
 from app.idempotency import is_duplicate_delivery
 from app.integrations import github_client, groq_client, slack_client
 from app.models import Event, PullRequest, WorkflowRun
+from app.routing import channels_for_repo
 from app.security import verify_github_signature
 
 logger = logging.getLogger(__name__)
@@ -80,12 +81,15 @@ async def _handle_pull_request(db: AsyncSession, payload: dict) -> None:
             text += f"\n\n*Summary:* {summary}"
         except Exception:
             logger.exception("Failed to generate PR summary for %s#%s", repo, pr["number"])
-        await slack_client.post_message(text)
+        for channel in await channels_for_repo(db, repo):
+            await slack_client.post_message(text, channel=channel)
     elif pr.get("merged"):
-        await slack_client.post_message(
+        text = (
             f"{ticket_key or repo} — PR Merged ✅\n\n"
             f"#{pr['number']} {pr['title']}\nAuthor: {pr['user']['login']}"
         )
+        for channel in await channels_for_repo(db, repo):
+            await slack_client.post_message(text, channel=channel)
 
 
 async def _handle_workflow_run(db: AsyncSession, payload: dict) -> None:
@@ -132,4 +136,5 @@ async def _handle_workflow_run(db: AsyncSession, payload: dict) -> None:
         except Exception:
             logger.exception("Failed to generate failure explanation for %s run %s", repo, run["id"])
 
-    await slack_client.post_message(text)
+    for channel in await channels_for_repo(db, repo):
+        await slack_client.post_message(text, channel=channel)

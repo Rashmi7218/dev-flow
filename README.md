@@ -77,7 +77,12 @@ suggested next action, not just a red X
    `/webhooks/slack/events` / `/webhooks/slack/commands` respectively.
 4. Start Colima (Docker Desktop replacement): `colima start`. Then `docker compose up --build`
 5. Check `http://localhost:8000/health`.
-6. Browse recent events and per-ticket timelines at `http://localhost:8000/dashboard`.
+6. Browse recent events and per-ticket timelines at `http://localhost:8000/dashboard` — this
+   (and everything under `/api/`) is gated by HTTP Basic Auth using the `ADMIN_USERNAME` /
+   `ADMIN_PASSWORD` values from your `.env`.
+7. If the org has multiple repos, use the "Repo Routing" section on the dashboard to bind each
+   repo to a Jira project key and one or more Slack channel IDs — see "Multi-repo routing"
+   below.
 
 For an always-on public deployment instead of local + ngrok, see "Deployment (Render)" in
 [RESOURCES.md](RESOURCES.md) — `render.yaml` provisions the whole stack from one file.
@@ -89,15 +94,37 @@ app/
   main.py            FastAPI app + router registration
   config.py          Settings loaded from .env
   db.py              Async SQLAlchemy engine/session
-  models.py          events, pull_requests, workflow_runs, issues, processed_deliveries
+  models.py          events, pull_requests, workflow_runs, issues, processed_deliveries,
+                     repo_configs, channel_bindings
   security.py        GitHub HMAC + Slack signature verification
+  auth.py            HTTP Basic Auth dependency for the dashboard/admin API
   idempotency.py      Webhook delivery dedup (see "Reliability" below)
   correlation.py      Ticket-key extraction (branch/title/commit -> KAN-42)
+  routing.py          Repo <-> Jira project / Slack channel lookups (see "Multi-repo routing")
   integrations/       Thin HTTP clients for GitHub, Jira, Slack, Groq APIs
   webhooks/           Webhook route handlers per source
-  dashboard.py        Read-only /dashboard page + /api/events, /api/tickets/{key}/timeline
-  static/dashboard.html  Dependency-free HTML/JS dashboard frontend
+  dashboard.py        /dashboard page + /api/events, /api/tickets/{key}/timeline (auth required)
+  admin.py            /api/admin/repos, /api/admin/bindings CRUD (auth required)
+  static/dashboard.html  Dependency-free HTML/JS dashboard + admin frontend
 ```
+
+## Multi-repo routing
+
+By default every event notifies the single `SLACK_DEFAULT_CHANNEL` and every ticket DevFlow
+creates goes to the single `JIRA_PROJECT_KEY`. For an org with multiple repos and channels, use
+the dashboard's "Repo Routing" section (`app/admin.py`, `app/routing.py`) to configure, per
+repo:
+
+- a **Jira project key** (`repo_configs` table) — used both for events arriving from that repo
+  and for tickets created from a Slack channel bound to it.
+- one or more **Slack channel IDs** (`channel_bindings` table) — GitHub/Jira events for that
+  repo fan out to every bound channel.
+
+A repo/channel with no configuration falls back to the global defaults, so nothing goes silent
+just because it hasn't been onboarded yet. If a Slack channel is bound to more than one repo,
+ticket-creation flows (`/devflow create`, thread → ticket) resolve the Jira project from
+whichever repo was bound first and log a warning — per-channel disambiguation when multiple
+repos share a channel is a known gap, not yet built.
 
 ## Testing
 
@@ -130,6 +157,13 @@ deliveries on timeout/non-2xx responses in production.
 - No token/cost tracking on Groq calls, and no schema validation on the JSON the model
   returns beyond a bare `json.loads` (a malformed response fails safely but isn't retried
   with a stricter prompt).
+- Admin auth is a single shared HTTP Basic username/password for the whole dashboard/admin API
+  — no per-user accounts, no audit log of who changed a routing binding.
+- Slack channel bindings are entered as raw channel IDs (copied from Slack) rather than picked
+  from a list of channels the bot has joined — a `conversations.list`-backed picker is future
+  work, not built in this pass.
+- A Slack channel bound to multiple repos can't be disambiguated for ticket-creation flows; the
+  first bound repo's Jira project is used and a warning is logged (see "Multi-repo routing").
 
 ## License
 
