@@ -17,7 +17,11 @@ services:
           property: connectionString
       - key: GITHUB_WEBHOOK_SECRET
         sync: false
-      - key: GITHUB_TOKEN
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_APP_PRIVATE_KEY
+        sync: false
+      - key: GITHUB_APP_SLUG
         sync: false
       - key: JIRA_BASE_URL
         sync: false

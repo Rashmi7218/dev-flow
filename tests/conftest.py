@@ -1,7 +1,19 @@
 import os
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+_test_app_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_test_app_key_pem = _test_app_key.private_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PrivateFormat.PKCS8,
+    encryption_algorithm=serialization.NoEncryption(),
+).decode()
+
 os.environ.setdefault("GITHUB_WEBHOOK_SECRET", "test-github-secret")
-os.environ.setdefault("GITHUB_TOKEN", "test-github-token")
+os.environ.setdefault("GITHUB_APP_ID", "123456")
+os.environ.setdefault("GITHUB_APP_PRIVATE_KEY", _test_app_key_pem)
+os.environ.setdefault("GITHUB_APP_SLUG", "devflow-test-app")
 os.environ.setdefault("JIRA_BASE_URL", "https://test.atlassian.net")
 os.environ.setdefault("JIRA_EMAIL", "test@example.com")
 os.environ.setdefault("JIRA_API_TOKEN", "test-jira-token")
@@ -18,6 +30,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.db import Base, engine
+from app.integrations import github_auth
 from app.main import app
 
 
@@ -28,6 +41,12 @@ async def _reset_db():
     yield
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_github_token_cache():
+    github_auth._token_cache.clear()
+    yield
 
 
 @pytest_asyncio.fixture

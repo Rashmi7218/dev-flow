@@ -184,6 +184,38 @@
     padding: 0;
   }
   .remove-btn:hover { text-decoration: underline; }
+  .field-heading { display: flex; align-items: center; gap: 6px; }
+  .info-btn {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .info-btn:hover, .info-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+  .field-help {
+    background: var(--accent-bg);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    margin-bottom: 12px;
+  }
+  .field-help code {
+    background: rgba(0, 0, 0, 0.08);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 11px;
+  }
   .error { color: var(--fail); }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
@@ -232,13 +264,29 @@
   </section>
 
   <section class="card">
-    <h2>Repo Routing</h2>
+    <h2>
+      Repo Routing
+      <span class="h2-actions">
+        <a id="github-app-link" href="#" target="_blank" rel="noopener" hidden>Manage GitHub App installation ↗</a>
+      </span>
+    </h2>
     <p class="empty" style="padding-top: 0;">
       Configure which Jira project each repo files tickets into, and which Slack channel(s)
       it notifies. Unconfigured repos fall back to the deployment's default project/channel.
+      Adding a new repo here doesn't make GitHub send it events — install the GitHub App on
+      that repo too (link above).
     </p>
 
-    <h3 style="font-size:13px; margin: 4px 0 8px;">Jira project per repo</h3>
+    <h3 class="field-heading" style="font-size:13px; margin: 4px 0 8px;">
+      Jira project per repo
+      <button type="button" class="info-btn" data-help="repo-config-help" aria-expanded="false" aria-label="Show field format help">ⓘ</button>
+    </h3>
+    <div id="repo-config-help" class="field-help" hidden>
+      <strong>Repo:</strong> GitHub <code>owner/repo</code> — e.g. <code>acme/widgets</code>.
+      Not the full URL — leave off <code>https://github.com/</code>.<br>
+      <strong>Jira project key:</strong> the short project key from your ticket IDs — e.g.
+      <code>KAN</code> in <code>KAN-123</code>, all caps.
+    </div>
     <div class="ticket-search">
       <input id="repo-config-repo" placeholder="org/repo" autocomplete="off">
       <input id="repo-config-project" placeholder="Jira project key (e.g. WID)" autocomplete="off">
@@ -249,7 +297,16 @@
       <tbody id="repo-configs-body"></tbody>
     </table>
 
-    <h3 style="font-size:13px; margin: 20px 0 8px;">Slack channel bindings</h3>
+    <h3 class="field-heading" style="font-size:13px; margin: 20px 0 8px;">
+      Slack channel bindings
+      <button type="button" class="info-btn" data-help="binding-help" aria-expanded="false" aria-label="Show field format help">ⓘ</button>
+    </h3>
+    <div id="binding-help" class="field-help" hidden>
+      <strong>Repo:</strong> same <code>owner/repo</code> format as above — e.g. <code>acme/widgets</code>.<br>
+      <strong>Slack channel ID:</strong> the channel's ID, not its name. In Slack: open the
+      channel → channel name at top → <em>View channel details</em> → scroll down →
+      <em>Copy channel ID</em>. Looks like <code>C0123456</code>, not <code>#engineering</code>.
+    </div>
     <div class="ticket-search">
       <input id="binding-repo" placeholder="org/repo" autocomplete="off">
       <input id="binding-channel" placeholder="Slack channel ID (e.g. C0123456)" autocomplete="off">
@@ -496,10 +553,34 @@ document.getElementById('bindings-body').addEventListener('click', async (e) => 
   }
 });
 
+async function loadGitHubAppLink() {
+  const link = document.getElementById('github-app-link');
+  try {
+    const resp = await fetch('/api/admin/github-app');
+    const data = await resp.json();
+    if (data.install_url) {
+      link.href = data.install_url;
+      link.hidden = false;
+    }
+  } catch (err) {
+    // Leave the link hidden if this fails — non-critical.
+  }
+}
+
+document.querySelectorAll('.info-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const help = document.getElementById(btn.dataset.help);
+    const expanded = !help.hidden;
+    help.hidden = expanded;
+    btn.setAttribute('aria-expanded', String(!expanded));
+  });
+});
+
 loadEvents();
 loadRecentTickets();
 loadRepoConfigs();
 loadBindings();
+loadGitHubAppLink();
 setInterval(loadEvents, 10000);
 setInterval(loadRecentTickets, 30000);
 </script>

@@ -16,6 +16,17 @@ def _sign(body: bytes) -> str:
     ).hexdigest()
 
 
+def _mock_github_app_auth():
+    respx.get("https://api.github.com/repos/acme/widgets/installation").mock(
+        return_value=Response(200, json={"id": 999})
+    )
+    respx.post("https://api.github.com/app/installations/999/access_tokens").mock(
+        return_value=Response(
+            201, json={"token": "test-installation-token", "expires_at": "2099-01-01T00:00:00Z"}
+        )
+    )
+
+
 def _pr_payload(action: str, merged: bool = False) -> dict:
     return {
         "action": action,
@@ -92,6 +103,7 @@ async def test_invalid_signature_rejected(client):
 
 @respx.mock
 async def test_pull_request_opened_posts_summary_to_slack(client):
+    _mock_github_app_auth()
     respx.get("https://api.github.com/repos/acme/widgets/pulls/42/files").mock(
         return_value=Response(200, json=[{"filename": "a.py", "additions": 5, "deletions": 1}])
     )
@@ -121,6 +133,7 @@ async def test_pull_request_opened_posts_summary_to_slack(client):
 
 @respx.mock
 async def test_pull_request_opened_degrades_gracefully_if_groq_fails(client):
+    _mock_github_app_auth()
     respx.get("https://api.github.com/repos/acme/widgets/pulls/42/files").mock(
         return_value=Response(200, json=[])
     )
@@ -153,6 +166,7 @@ async def test_pull_request_opened_fans_out_to_bound_channels(client):
         )
         await db.commit()
 
+    _mock_github_app_auth()
     respx.get("https://api.github.com/repos/acme/widgets/pulls/42/files").mock(
         return_value=Response(200, json=[])
     )
@@ -212,6 +226,7 @@ def _workflow_run_payload(conclusion: str) -> dict:
 
 @respx.mock
 async def test_workflow_run_failure_includes_explanation(client):
+    _mock_github_app_auth()
     respx.get("https://api.github.com/repos/acme/widgets/actions/runs/999/jobs").mock(
         return_value=Response(
             200,

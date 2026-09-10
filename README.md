@@ -33,7 +33,7 @@ See [devflow-ai-project-idea.md](devflow-ai-project-idea.md) for the full produc
   hidden reasoning and returning empty content) was fixed with `reasoning_effort: "low"`.
 - **Tested at the right layer.** Prompt-construction and job/step-filtering logic is unit
   tested directly (mocking only the LLM call), while webhook integration tests cover full
-  request→Slack/Jira round trips with all outbound HTTP mocked via `respx` — 65 tests, no
+  request→Slack/Jira round trips with all outbound HTTP mocked via `respx` — 91 tests, no
   live credentials needed, running in CI on every push.
 
 ## Architecture
@@ -68,24 +68,32 @@ suggested next action, not just a red X
 
 ## Setup
 
-1. Work through [RESOURCES.md](RESOURCES.md) to create the GitHub/Jira/Slack accounts and
-   credentials.
-2. Copy `.env.example` to `.env` and fill in the values.
+1. Work through [RESOURCES.md](RESOURCES.md) to create the Jira/Slack accounts and credentials,
+   and — once, for the whole org — a GitHub App (permissions, webhook URL/secret, private key).
+2. Copy `.env.example` to `.env` and fill in the values, including the GitHub App's ID, private
+   key, and slug from step 1.
 3. Start an ngrok tunnel: `ngrok http 8000` (or `ngrok http --url=<your-static-domain> 8000`)
-   and point the GitHub, Jira, and Slack webhook configs at
-   `https://<your-domain>/webhooks/github`, `/webhooks/jira?token=...`, and
-   `/webhooks/slack/events` / `/webhooks/slack/commands` respectively.
+   and point the GitHub App's webhook URL (set once, in the App's own settings — not per repo),
+   the Jira webhook config, and the Slack event/command URLs at `https://<your-domain>/webhooks/github`,
+   `/webhooks/jira?token=...`, and `/webhooks/slack/events` / `/webhooks/slack/commands`
+   respectively.
 4. Start Colima (Docker Desktop replacement): `colima start`. Then `docker compose up --build`
 5. Check `http://localhost:8000/health`.
 6. Browse recent events and per-ticket timelines at `http://localhost:8000/dashboard` — this
    (and everything under `/api/`) is gated by HTTP Basic Auth using the `ADMIN_USERNAME` /
    `ADMIN_PASSWORD` values from your `.env`.
-7. If the org has multiple repos, use the "Repo Routing" section on the dashboard to bind each
+7. Install the GitHub App on each repo you want DevFlow to track — the dashboard's "Repo
+   Routing" card has a "Manage GitHub App installation" link straight to GitHub's install page,
+   so this is the only per-repo step left (no more manual per-repo webhook forms).
+8. If the org has multiple repos, use the "Repo Routing" section on the dashboard to bind each
    repo to a Jira project key and one or more Slack channel IDs — see "Multi-repo routing"
    below.
 
 For an always-on public deployment instead of local + ngrok, see "Deployment (Render)" in
 [RESOURCES.md](RESOURCES.md) — `render.yaml` provisions the whole stack from one file.
+
+For the full feature inventory, architecture, and known-limitations reference, see
+[DEVELOPERS.md](DEVELOPERS.md).
 
 ## Layout
 
@@ -102,6 +110,7 @@ app/
   correlation.py      Ticket-key extraction (branch/title/commit -> KAN-42)
   routing.py          Repo <-> Jira project / Slack channel lookups (see "Multi-repo routing")
   integrations/       Thin HTTP clients for GitHub, Jira, Slack, Groq APIs
+  integrations/github_auth.py  GitHub App JWT + installation-token exchange (cached)
   webhooks/           Webhook route handlers per source
   dashboard.py        /dashboard page + /api/events, /api/tickets/{key}/timeline (auth required)
   admin.py            /api/admin/repos, /api/admin/bindings CRUD (auth required)
@@ -164,6 +173,12 @@ deliveries on timeout/non-2xx responses in production.
   work, not built in this pass.
 - A Slack channel bound to multiple repos can't be disambiguated for ticket-creation flows; the
   first bound repo's Jira project is used and a warning is logged (see "Multi-repo routing").
+- The GitHub App's installation-token cache (`app/integrations/github_auth.py`) is in-process
+  only — fine for the single-instance deployment this project runs as, but wouldn't be safe
+  shared across multiple replicas without moving it to Redis/similar.
+- If the GitHub App is uninstalled or suspended, GitHub events for the affected repos stop
+  arriving silently — there's no detection/alerting for this today (see
+  [DEVELOPERS.md](DEVELOPERS.md) for the full limitations list).
 
 ## License
 

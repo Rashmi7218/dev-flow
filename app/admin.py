@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_admin
+from app.config import settings
 from app.db import get_db
 from app.models import ChannelBinding, RepoConfig
 
@@ -28,6 +29,13 @@ def _repo_config_dict(row: RepoConfig) -> dict:
 
 def _channel_binding_dict(row: ChannelBinding) -> dict:
     return {"id": row.id, "repo": row.repo, "slack_channel": row.slack_channel}
+
+
+@router.get("/github-app")
+async def github_app_info():
+    if not settings.github_app_slug:
+        return {"install_url": None}
+    return {"install_url": f"https://github.com/apps/{settings.github_app_slug}/installations/new"}
 
 
 @router.get("/repos")

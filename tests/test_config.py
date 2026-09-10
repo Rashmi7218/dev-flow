@@ -2,7 +2,8 @@ from app.config import Settings
 
 _REQUIRED = {
     "github_webhook_secret": "s",
-    "github_token": "t",
+    "github_app_id": "123456",
+    "github_app_private_key": "test-key",
     "jira_base_url": "https://x.atlassian.net",
     "jira_email": "a@b.com",
     "jira_api_token": "t",

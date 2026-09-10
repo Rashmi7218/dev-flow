@@ -19,7 +19,9 @@ class Settings(BaseSettings):
         return v
 
     github_webhook_secret: str
-    github_token: str
+    github_app_id: str
+    github_app_private_key: str
+    github_app_slug: str = ""
 
     jira_base_url: str
     jira_email: str
