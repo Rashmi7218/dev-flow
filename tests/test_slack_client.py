@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import respx
 from httpx import Response
@@ -16,8 +18,6 @@ async def test_post_message_sends_channel_thread_and_blocks():
     )
 
     sent = route.calls.last.request
-    import json
-
     body = json.loads(sent.content)
     assert body["channel"] == "C1"
     assert body["thread_ts"] == "123.456"
@@ -31,8 +31,6 @@ async def test_post_message_defaults_to_configured_channel():
     )
 
     await slack_client.post_message("hi")
-
-    import json
 
     body = json.loads(route.calls.last.request.content)
     assert body["channel"] == slack_client.settings.slack_default_channel
@@ -48,6 +46,34 @@ async def test_post_message_raises_on_slack_error():
 
     with pytest.raises(RuntimeError, match="channel_not_found"):
         await slack_client.post_message("hi", channel="C1")
+
+
+@respx.mock
+async def test_post_to_channels_posts_to_every_channel():
+    route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    await slack_client.post_to_channels("hi", ["C1", "C2"])
+
+    sent_channels = {json.loads(call.request.content)["channel"] for call in route.calls}
+    assert sent_channels == {"C1", "C2"}
+
+
+@respx.mock
+async def test_post_to_channels_one_failure_does_not_block_the_others():
+    def _respond(request):
+        body = json.loads(request.content)
+        if body["channel"] == "C1":
+            return Response(200, json={"ok": False, "error": "not_in_channel"})
+        return Response(200, json={"ok": True})
+
+    route = respx.post("https://slack.com/api/chat.postMessage").mock(side_effect=_respond)
+
+    await slack_client.post_to_channels("hi", ["C1", "C2"])
+
+    sent_channels = {json.loads(call.request.content)["channel"] for call in route.calls}
+    assert sent_channels == {"C1", "C2"}
 
 
 @respx.mock

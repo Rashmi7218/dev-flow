@@ -81,15 +81,13 @@ async def _handle_pull_request(db: AsyncSession, payload: dict) -> None:
             text += f"\n\n*Summary:* {summary}"
         except Exception:
             logger.exception("Failed to generate PR summary for %s#%s", repo, pr["number"])
-        for channel in await channels_for_repo(db, repo):
-            await slack_client.post_message(text, channel=channel)
+        await slack_client.post_to_channels(text, await channels_for_repo(db, repo))
     elif pr.get("merged"):
         text = (
             f"{ticket_key or repo} — PR Merged ✅\n\n"
             f"#{pr['number']} {pr['title']}\nAuthor: {pr['user']['login']}"
         )
-        for channel in await channels_for_repo(db, repo):
-            await slack_client.post_message(text, channel=channel)
+        await slack_client.post_to_channels(text, await channels_for_repo(db, repo))
 
 
 async def _handle_workflow_run(db: AsyncSession, payload: dict) -> None:
@@ -136,5 +134,4 @@ async def _handle_workflow_run(db: AsyncSession, payload: dict) -> None:
         except Exception:
             logger.exception("Failed to generate failure explanation for %s run %s", repo, run["id"])
 
-    for channel in await channels_for_repo(db, repo):
-        await slack_client.post_message(text, channel=channel)
+    await slack_client.post_to_channels(text, await channels_for_repo(db, repo))

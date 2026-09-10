@@ -53,7 +53,6 @@ async def handle_jira_webhook(
     status_changed = any(item.get("field") == "status" for item in changelog.get("items", []))
     if status_changed:
         text = f"{key} — Status Updated\n\nNew Status: {status}"
-        for channel in await channels_for_jira_project(db, project):
-            await slack_client.post_message(text, channel=channel)
+        await slack_client.post_to_channels(text, await channels_for_jira_project(db, project))
 
     return {"status": "accepted"}

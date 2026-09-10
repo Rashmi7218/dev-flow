@@ -36,6 +36,11 @@ fires.
 - **Idempotent delivery handling** (`app/idempotency.py`): a `processed_deliveries` table keyed
   by provider delivery ID short-circuits retried webhook deliveries before any side effect
   re-fires.
+- **Fault-isolated Slack fan-out** (`slack_client.post_to_channels`,
+  `app/integrations/slack_client.py`): a repo can notify several bound channels; one channel
+  failing (bot not invited, channel deleted, rate-limited) is logged and skipped rather than
+  raising, so it neither 500s the webhook delivery nor blocks the other channels in the same
+  fan-out.
 - **AI layer** (`app/integrations/groq_client.py`), every call wrapped so a Groq outage/bad
   response degrades gracefully instead of breaking the underlying feature:
   - PR-opened summaries (what changed and why, from the changed-files diff)
@@ -103,6 +108,10 @@ integration-style request→side-effect coverage per source.
 - No token/cost tracking on Groq calls, and no schema validation on the JSON the model returns
   beyond a bare `json.loads` (a malformed response fails safely but isn't retried with a
   stricter prompt).
+- Slack fan-out failures (`slack_client.post_to_channels`) are logged and skipped, not surfaced
+  anywhere else — no alerting on a channel that fails repeatedly, so a misconfigured channel can
+  go unnoticed until someone checks the logs or notices missing notifications. This was a
+  deliberate tradeoff (fault isolation over loud failure) — see "Reliability" in README.md.
 
 **Auth / access control**
 - Jira webhook auth is a shared-secret query token, since Jira Cloud's built-in webhook UI

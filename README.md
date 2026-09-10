@@ -161,12 +161,16 @@ Four independent things determine whether a repo's events actually reach the rig
 
 ### Troubleshooting
 
-- **Nothing in Slack, and the delivery in GitHub shows a red ❌ / 500**: almost always the bot
-  isn't in the bound channel (or the fallback `SLACK_DEFAULT_CHANNEL`) — Slack's API error is
-  `not_in_channel`. Invite the bot and redeliver.
-- **Nothing in Slack, but the delivery shows a green ✅ / 200**: the message was sent somewhere
-  successfully — you're likely looking at the wrong channel. Re-check exactly which channel ID
-  this repo is bound to in "Repo Routing", and look there specifically.
+- **Nothing in Slack, but the delivery in GitHub shows green ✅ / 200**: two possible causes,
+  both now show the same green checkmark since Slack posting is fault-isolated per channel (see
+  "Reliability" below) — a failure to post no longer fails the whole delivery:
+  - You're looking at the wrong channel — re-check exactly which channel ID this repo is bound
+    to in "Repo Routing", and look there specifically.
+  - The bot isn't a member of the bound channel (or the fallback `SLACK_DEFAULT_CHANNEL`) —
+    Slack's API error is `not_in_channel`. This only surfaces in the server logs now (search for
+    "Failed to post to Slack channel"), not as a failed GitHub delivery — invite the bot and
+    trigger a new event to confirm (redelivering the same event won't re-run the Slack post
+    against a delivery ID it's already processed).
 - **No delivery shows up in GitHub at all**: the App probably isn't installed on that repo —
   check `github.com/settings/apps/<your-app-slug>` → **Advanced** tab → **Recent Deliveries**
   (this is different from a classic repo-level webhook's own "Recent Deliveries" tab, if you
@@ -216,6 +220,12 @@ delivery returns `{"status": "duplicate"}` immediately, without re-posting to Sl
 Jira tickets, or re-calling Groq — this matters because GitHub and Slack both retry webhook
 deliveries on timeout/non-2xx responses in production.
 
+Slack fan-out is fault-isolated per channel (`slack_client.post_to_channels`,
+`app/integrations/slack_client.py`): a bound repo can notify several channels, and one channel
+failing (bot not invited, channel deleted, Slack rate-limited) is logged and skipped rather than
+raising — it doesn't 500 the whole webhook delivery, and it doesn't stop the other, correctly
+configured channels from getting their notification.
+
 ## Known limitations
 
 - Events are processed inline in the webhook request, not via a queue/worker (Redis/Celery
@@ -241,6 +251,10 @@ deliveries on timeout/non-2xx responses in production.
 - If the GitHub App is uninstalled or suspended, GitHub events for the affected repos stop
   arriving silently — there's no detection/alerting for this today (see
   [DEVELOPERS.md](DEVELOPERS.md) for the full limitations list).
+- A Slack channel that repeatedly fails to receive posts (bot removed, channel archived) fails
+  silently from GitHub/Jira's point of view — it's logged (`app/integrations/slack_client.py`)
+  but there's no alerting on repeated failures, so a misconfigured channel can go unnoticed
+  until someone happens to check the logs or notices the missing notifications.
 
 ## License
 

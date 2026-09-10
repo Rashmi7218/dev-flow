@@ -191,6 +191,45 @@ async def test_pull_request_opened_fans_out_to_bound_channels(client):
 
 
 @respx.mock
+async def test_pull_request_opened_one_bad_channel_does_not_500_or_block_the_others(client):
+    async with SessionLocal() as db:
+        db.add_all(
+            [
+                ChannelBinding(repo="acme/widgets", slack_channel="C111"),
+                ChannelBinding(repo="acme/widgets", slack_channel="C222"),
+            ]
+        )
+        await db.commit()
+
+    _mock_github_app_auth()
+    respx.get("https://api.github.com/repos/acme/widgets/pulls/42/files").mock(
+        return_value=Response(200, json=[])
+    )
+    respx.post("https://api.groq.com/openai/v1/chat/completions").mock(return_value=Response(500))
+
+    def _respond(request):
+        body = json.loads(request.content)
+        if body["channel"] == "C111":
+            return Response(200, json={"ok": False, "error": "not_in_channel"})
+        return Response(200, json={"ok": True})
+
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(side_effect=_respond)
+
+    body = json.dumps(_pr_payload("opened")).encode()
+    resp = await client.post(
+        "/webhooks/github",
+        content=body,
+        headers={"X-GitHub-Event": "pull_request", "X-Hub-Signature-256": _sign(body)},
+    )
+
+    assert resp.status_code == 200
+    sent_channels = {
+        json.loads(call.request.content)["channel"] for call in slack_route.calls
+    }
+    assert sent_channels == {"C111", "C222"}
+
+
+@respx.mock
 async def test_pull_request_merged_posts_to_slack(client):
     slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
         return_value=Response(200, json={"ok": True})

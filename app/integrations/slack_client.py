@@ -1,6 +1,10 @@
+import logging
+
 import httpx
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _headers() -> dict:
@@ -28,6 +32,14 @@ async def post_message(
         if not data.get("ok"):
             raise RuntimeError(f"Slack API error: {data.get('error')}")
         return data
+
+
+async def post_to_channels(text: str, channels: list[str]) -> None:
+    for channel in channels:
+        try:
+            await post_message(text, channel=channel)
+        except Exception:
+            logger.exception("Failed to post to Slack channel %s", channel)
 
 
 async def get_thread_replies(channel: str, thread_ts: str) -> list[dict]:
