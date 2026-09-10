@@ -33,7 +33,7 @@ See [devflow-ai-project-idea.md](devflow-ai-project-idea.md) for the full produc
   hidden reasoning and returning empty content) was fixed with `reasoning_effort: "low"`.
 - **Tested at the right layer.** Prompt-construction and job/step-filtering logic is unit
   tested directly (mocking only the LLM call), while webhook integration tests cover full
-  request→Slack/Jira round trips with all outbound HTTP mocked via `respx` — 91 tests, no
+  request→Slack/Jira round trips with all outbound HTTP mocked via `respx` — 94 tests, no
   live credentials needed, running in CI on every push.
 
 ## Architecture
@@ -51,10 +51,28 @@ flowchart LR
     API --> DASH[Dashboard\nevents + ticket timeline]
 ```
 
+## Reliability
+
+Webhook deliveries are deduped by their provider-supplied delivery ID (`X-GitHub-Delivery` for
+GitHub, `X-Atlassian-Webhook-Identifier` for Jira, `event_id` for Slack Events API) against a
+`processed_deliveries` table (`app/idempotency.py`). A provider retry of an already-processed
+delivery returns `{"status": "duplicate"}` immediately, without re-posting to Slack, re-creating
+Jira tickets, or re-calling Groq — this matters because GitHub and Slack both retry webhook
+deliveries on timeout/non-2xx responses in production.
+
+Slack fan-out is fault-isolated per channel (`slack_client.post_to_channels`,
+`app/integrations/slack_client.py`): a bound repo can notify several channels, and one channel
+failing (bot not invited, channel deleted, Slack rate-limited) is logged and skipped rather than
+raising — it doesn't 500 the whole webhook delivery, and it doesn't stop the other, correctly
+configured channels from getting their notification.
+
 ## Screenshots
 
 **Dashboard** — recent events feed + per-ticket timeline aggregating GitHub, Jira, and CI data
 ![Dashboard](screenshots/Dashboard.png)
+
+**Repo Routing** — bind each repo to a Jira project key and Slack channel(s) from the dashboard
+![Dashboard repo routing settings](screenshots/Dashboard-repo-routing-setting.png)
 
 **AI PR summary in Slack** — opened PR gets an AI-generated summary of what changed and why
 ![AI PR summary](screenshots/slack-PR-summary.png)
@@ -88,8 +106,8 @@ suggested next action, not just a red X
 For an always-on public deployment instead of local + ngrok, see "Deployment (Render)" in
 [RESOURCES.md](RESOURCES.md) — `render.yaml` provisions the whole stack from one file.
 
-For the full feature inventory, architecture, and known-limitations reference, see
-[DEVELOPERS.md](DEVELOPERS.md).
+For the full feature inventory, module-by-module code layout, architecture, and
+known-limitations reference, see [DEVELOPERS.md](DEVELOPERS.md).
 
 ## Connecting GitHub, Jira, and Slack
 
@@ -163,7 +181,7 @@ Four independent things determine whether a repo's events actually reach the rig
 
 - **Nothing in Slack, but the delivery in GitHub shows green ✅ / 200**: two possible causes,
   both now show the same green checkmark since Slack posting is fault-isolated per channel (see
-  "Reliability" below) — a failure to post no longer fails the whole delivery:
+  "Reliability" above) — a failure to post no longer fails the whole delivery:
   - You're looking at the wrong channel — re-check exactly which channel ID this repo is bound
     to in "Repo Routing", and look there specifically.
   - The bot isn't a member of the bound channel (or the fallback `SLACK_DEFAULT_CHANNEL`) —
@@ -178,28 +196,6 @@ Four independent things determine whether a repo's events actually reach the rig
   App — delete it, otherwise you'll get duplicate notifications from two separate webhooks
   firing on the same event).
 
-## Layout
-
-```
-app/
-  main.py            FastAPI app + router registration
-  config.py          Settings loaded from .env
-  db.py              Async SQLAlchemy engine/session
-  models.py          events, pull_requests, workflow_runs, issues, processed_deliveries,
-                     repo_configs, channel_bindings
-  security.py        GitHub HMAC + Slack signature verification
-  auth.py            HTTP Basic Auth dependency for the dashboard/admin API
-  idempotency.py      Webhook delivery dedup (see "Reliability" below)
-  correlation.py      Ticket-key extraction (branch/title/commit -> KAN-42)
-  routing.py          Repo <-> Jira project / Slack channel lookups (see "Connecting GitHub, Jira, and Slack")
-  integrations/       Thin HTTP clients for GitHub, Jira, Slack, Groq APIs
-  integrations/github_auth.py  GitHub App JWT + installation-token exchange (cached)
-  webhooks/           Webhook route handlers per source
-  dashboard.py        /dashboard page + /api/events, /api/tickets/{key}/timeline (auth required)
-  admin.py            /api/admin/repos, /api/admin/bindings CRUD (auth required)
-  static/dashboard.html  Dependency-free HTML/JS dashboard + admin frontend
-```
-
 ## Testing
 
 ```
@@ -210,21 +206,6 @@ pytest -v
 Tests run against an in-memory SQLite DB and mock all outbound HTTP (GitHub, Jira, Slack, Groq)
 via `respx` — no live credentials or Docker needed. CI (`.github/workflows/ci.yml`) runs this
 suite on every push/PR.
-
-## Reliability
-
-Webhook deliveries are deduped by their provider-supplied delivery ID (`X-GitHub-Delivery` for
-GitHub, `X-Atlassian-Webhook-Identifier` for Jira, `event_id` for Slack Events API) against a
-`processed_deliveries` table (`app/idempotency.py`). A provider retry of an already-processed
-delivery returns `{"status": "duplicate"}` immediately, without re-posting to Slack, re-creating
-Jira tickets, or re-calling Groq — this matters because GitHub and Slack both retry webhook
-deliveries on timeout/non-2xx responses in production.
-
-Slack fan-out is fault-isolated per channel (`slack_client.post_to_channels`,
-`app/integrations/slack_client.py`): a bound repo can notify several channels, and one channel
-failing (bot not invited, channel deleted, Slack rate-limited) is logged and skipped rather than
-raising — it doesn't 500 the whole webhook delivery, and it doesn't stop the other, correctly
-configured channels from getting their notification.
 
 ## Known limitations
 
