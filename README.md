@@ -33,7 +33,7 @@ See [devflow-ai-project-idea.md](devflow-ai-project-idea.md) for the full produc
   hidden reasoning and returning empty content) was fixed with `reasoning_effort: "low"`.
 - **Tested at the right layer.** Prompt-construction and job/step-filtering logic is unit
   tested directly (mocking only the LLM call), while webhook integration tests cover full
-  request→Slack/Jira round trips with all outbound HTTP mocked via `respx` — 94 tests, no
+  request→Slack/Jira round trips with all outbound HTTP mocked via `respx` — 111 tests, no
   live credentials needed, running in CI on every push.
 
 ## Architecture
@@ -65,6 +65,29 @@ Slack fan-out is fault-isolated per channel (`slack_client.post_to_channels`,
 failing (bot not invited, channel deleted, Slack rate-limited) is logged and skipped rather than
 raising — it doesn't 500 the whole webhook delivery, and it doesn't stop the other, correctly
 configured channels from getting their notification.
+
+## Autonomous agent
+
+Beyond reacting to webhooks, DevFlow can run a **bounded autonomous agent** against a
+higher-level goal — e.g. *"take KAN-42 through the post-merge workflow"* — via
+`/devflow agent <goal mentioning a ticket key>` in Slack. It's a real plan → act → observe →
+re-plan loop (`app/agent/loop.py`), not a hardcoded flowchart: each turn, Groq's function-calling
+picks one tool from a small internal registry (`app/agent/tools.py`), the result feeds back in,
+and the model decides the next move based on what it actually observed — including re-planning
+around a CI failure or a rejected action, not just branching on success/fail.
+
+| Action | Autonomy |
+|---|---|
+| Read Jira ticket status, linked PRs, CI runs/job details | Autonomous |
+| Post a Slack update | Autonomous |
+| Transition the Jira ticket's status | **Requires human approval** — the agent posts an Approve/Cancel prompt to the requesting Slack channel and suspends until someone responds |
+
+There's no "merge a PR" or "deploy" tool — the GitHub App only has read permissions
+(`app/integrations/github_auth.py`), so those stay firmly out of scope rather than being gated
+by an approval that isn't backed by real write access. Every run's full step-by-step trace (each
+tool call, its result, approval requests/outcomes) is persisted (`AgentRun`/`AgentStep` in
+`app/models.py`) and viewable on the dashboard's "Agent Runs" card — click a run to see the
+whole trace, not just the final outcome.
 
 ## Screenshots
 
@@ -102,6 +125,8 @@ suggested next action, not just a red X
    `ADMIN_PASSWORD` values from your `.env`.
 7. Now connect GitHub repos, Jira projects, and Slack channels to each other — see "Connecting
    GitHub, Jira, and Slack" below.
+8. Try `/devflow agent take <a real ticket key> through the post-merge workflow` in a channel
+   the bot is in — see "Autonomous agent" above for what it can and can't do.
 
 For an always-on public deployment instead of local + ngrok, see "Deployment (Render)" in
 [RESOURCES.md](RESOURCES.md) — `render.yaml` provisions the whole stack from one file.
@@ -236,6 +261,17 @@ suite on every push/PR.
   silently from GitHub/Jira's point of view — it's logged (`app/integrations/slack_client.py`)
   but there's no alerting on repeated failures, so a misconfigured channel can go unnoticed
   until someone happens to check the logs or notices the missing notifications.
+- The agent loop calls one tool per turn (no parallel tool calls) and is capped at a hard
+  `MAX_ITERATIONS` (`app/agent/loop.py`) with no per-run configurability — simple and bounded,
+  but a genuinely multi-branch goal could exhaust the budget before finishing. A suspended
+  (`waiting_approval`) run lives in Postgres, but *resuming* it depends on an in-process
+  background task the same way webhook processing does — a server restart while a run is
+  actively executing (not merely waiting on a human) loses that run's progress, same inline/
+  no-queue ceiling as everything else in "Known limitations" above.
+- There's no live-model evaluation harness for the agent — instead, `tests/test_agent_loop.py`
+  scripts Groq's tool-call responses deterministically to test control flow (multi-turn
+  re-planning, approval suspend/resume, iteration-budget exhaustion), which catches loop bugs
+  but doesn't tell you how the *real* model behaves on a novel goal.
 
 ## License
 

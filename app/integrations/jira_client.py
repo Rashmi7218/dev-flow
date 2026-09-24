@@ -54,3 +54,19 @@ async def add_comment(key: str, body: str) -> dict:
         )
         resp.raise_for_status()
         return resp.json()
+
+
+async def get_transitions(key: str) -> list[dict]:
+    async with httpx.AsyncClient(auth=_auth()) as client:
+        resp = await client.get(f"{settings.jira_base_url}/rest/api/3/issue/{key}/transitions")
+        resp.raise_for_status()
+        return resp.json()["transitions"]
+
+
+async def transition_issue(key: str, transition_id: str) -> None:
+    async with httpx.AsyncClient(auth=_auth()) as client:
+        resp = await client.post(
+            f"{settings.jira_base_url}/rest/api/3/issue/{key}/transitions",
+            json={"transition": {"id": transition_id}},
+        )
+        resp.raise_for_status()

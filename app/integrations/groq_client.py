@@ -29,6 +29,27 @@ async def _chat(prompt: str, *, max_tokens: int, json_mode: bool = False) -> str
         return data["choices"][0]["message"]["content"].strip()
 
 
+async def agent_step(messages: list[dict], tools: list[dict]) -> dict:
+    body = {
+        "model": settings.groq_model,
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 800,
+        "reasoning_effort": "low",
+        "tools": tools,
+        "tool_choice": "auto",
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{BASE_URL}/chat/completions",
+            headers={"Authorization": f"Bearer {settings.groq_api_key}"},
+            json=body,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]
+
+
 async def summarize_pr(title: str, body: str | None, files: list[dict]) -> str:
     file_lines = []
     for f in files[:20]:

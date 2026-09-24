@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import require_admin
 from app.db import get_db
 from app.integrations import jira_client
-from app.models import Event, Issue, PullRequest, WorkflowRun
+from app.models import AgentRun, AgentStep, Event, Issue, PullRequest, WorkflowRun
 
 logger = logging.getLogger(__name__)
 
@@ -130,4 +130,54 @@ async def ticket_timeline(key: str, db: AsyncSession = Depends(get_db)):
         "jira_status": jira_status,
         "jira_summary": jira_summary,
         "timeline": timeline,
+    }
+
+
+@router.get("/api/agent-runs")
+async def list_agent_runs(limit: int = 20, db: AsyncSession = Depends(get_db)):
+    limit = max(1, min(limit, 100))
+    result = await db.execute(select(AgentRun).order_by(AgentRun.id.desc()).limit(limit))
+    runs = result.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "goal": r.goal,
+            "ticket_key": r.ticket_key,
+            "status": r.status,
+            "requested_by": r.requested_by,
+            "final_summary": r.final_summary,
+            "updated_at": r.updated_at.isoformat(),
+        }
+        for r in runs
+    ]
+
+
+@router.get("/api/agent-runs/{run_id}")
+async def agent_run_detail(run_id: int, db: AsyncSession = Depends(get_db)):
+    run = await db.get(AgentRun, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+
+    step_result = await db.execute(
+        select(AgentStep).where(AgentStep.run_id == run_id).order_by(AgentStep.step_number)
+    )
+    steps = step_result.scalars().all()
+
+    return {
+        "id": run.id,
+        "goal": run.goal,
+        "ticket_key": run.ticket_key,
+        "status": run.status,
+        "requested_by": run.requested_by,
+        "final_summary": run.final_summary,
+        "steps": [
+            {
+                "step_number": s.step_number,
+                "kind": s.kind,
+                "tool_name": s.tool_name,
+                "detail": s.detail,
+                "created_at": s.created_at.isoformat(),
+            }
+            for s in steps
+        ],
     }

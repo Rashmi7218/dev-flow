@@ -317,6 +317,24 @@
       <tbody id="bindings-body"></tbody>
     </table>
   </section>
+
+  <section class="card">
+    <h2>
+      Agent Runs
+      <span class="h2-actions">
+        <button id="refresh-agent-runs">Refresh</button>
+      </span>
+    </h2>
+    <p class="empty" style="padding-top: 0;">
+      Runs started via <code>/devflow agent &lt;goal mentioning a ticket key&gt;</code> in Slack.
+      Click a run to see its step-by-step trace.
+    </p>
+    <table>
+      <thead><tr><th>Ticket</th><th>Goal</th><th>Status</th><th>Updated</th></tr></thead>
+      <tbody id="agent-runs-body"></tbody>
+    </table>
+    <div id="agent-run-detail"></div>
+  </section>
 </main>
 
 <script>
@@ -576,11 +594,75 @@ document.querySelectorAll('.info-btn').forEach(btn => {
   });
 });
 
+function agentStatusBadge(status) {
+  const cls = { done: 'evt-success', failed: 'evt-fail' }[status] || 'evt-neutral';
+  return `<span class="badge ${cls}">${status}</span>`;
+}
+
+async function loadAgentRuns() {
+  const tbody = document.getElementById('agent-runs-body');
+  try {
+    const resp = await fetch('/api/agent-runs?limit=20');
+    const runs = await resp.json();
+    tbody.innerHTML = runs.length
+      ? runs.map(r => `
+        <tr>
+          <td><a href="#" class="agent-run-link" data-id="${r.id}">${r.ticket_key || '—'}</a></td>
+          <td>${r.goal}</td>
+          <td>${agentStatusBadge(r.status)}</td>
+          <td>${fmtTime(r.updated_at)}</td>
+        </tr>
+      `).join('')
+      : '<tr><td colspan="4" class="empty">No agent runs yet.</td></tr>';
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="4" class="error">Failed to load agent runs.</td></tr>';
+  }
+}
+
+async function loadAgentRunDetail(id) {
+  const container = document.getElementById('agent-run-detail');
+  container.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const resp = await fetch(`/api/agent-runs/${id}`);
+    const data = await resp.json();
+
+    let html = `<div class="ticket-header">
+      <span class="key">${data.ticket_key || data.goal}</span>
+      ${agentStatusBadge(data.status)}
+      ${data.final_summary ? `<div class="summary">${data.final_summary}</div>` : ''}
+    </div>`;
+
+    if (!data.steps.length) {
+      html += '<div class="empty">No steps recorded yet.</div>';
+    } else {
+      html += '<div class="timeline">' + data.steps.map(s => `
+        <div class="timeline-item ${s.kind === 'final' ? (data.status === 'done' ? 'success' : 'fail') : ''}">
+          <div class="label">${s.tool_name ? `${s.kind}: ${s.tool_name}` : s.kind}</div>
+          <div class="detail">${s.detail}</div>
+          <div class="ts">${fmtTime(s.created_at)}</div>
+        </div>
+      `).join('') + '</div>';
+    }
+    container.innerHTML = html;
+  } catch (err) {
+    container.innerHTML = '<div class="error">Failed to load run detail.</div>';
+  }
+}
+
+document.getElementById('agent-runs-body').addEventListener('click', (e) => {
+  if (e.target.classList.contains('agent-run-link')) {
+    e.preventDefault();
+    loadAgentRunDetail(e.target.dataset.id);
+  }
+});
+document.getElementById('refresh-agent-runs').addEventListener('click', loadAgentRuns);
+
 loadEvents();
 loadRecentTickets();
 loadRepoConfigs();
 loadBindings();
 loadGitHubAppLink();
+loadAgentRuns();
 setInterval(loadEvents, 10000);
 setInterval(loadRecentTickets, 30000);
 </script>

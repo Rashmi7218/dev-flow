@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import JSON, BigInteger, DateTime, String, UniqueConstraint, func
+from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -102,6 +102,40 @@ class ChannelBinding(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     repo: Mapped[str] = mapped_column(String(200))
     slack_channel: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    goal: Mapped[str] = mapped_column(String(500))
+    ticket_key: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    status: Mapped[str] = mapped_column(String(20))
+    requested_by: Mapped[str] = mapped_column(String(100))
+    channel: Mapped[str] = mapped_column(String(50))
+    messages: Mapped[list] = mapped_column(JSON)
+    pending_tool_call: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    final_summary: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AgentStep(Base):
+    __tablename__ = "agent_steps"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("agent_runs.id"))
+    step_number: Mapped[int] = mapped_column()
+    kind: Mapped[str] = mapped_column(String(30))
+    tool_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    detail: Mapped[str] = mapped_column(String(2000))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

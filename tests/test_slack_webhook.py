@@ -6,10 +6,11 @@ from urllib.parse import urlencode
 
 import respx
 from httpx import Response
+from sqlalchemy import select
 
 from app.config import settings
 from app.db import SessionLocal
-from app.models import ChannelBinding, RepoConfig
+from app.models import AgentRun, ChannelBinding, RepoConfig
 
 
 def _slack_headers(body: bytes, timestamp: int | None = None) -> dict:
@@ -58,6 +59,71 @@ async def test_command_without_create_prefix_returns_usage(client):
     )
     assert resp.status_code == 200
     assert "Usage" in resp.json()["text"]
+
+
+async def test_command_agent_without_ticket_key_returns_usage(client):
+    body = urlencode(
+        {"text": "agent take something through the post-merge workflow", "response_url": "https://x"}
+    ).encode()
+    resp = await client.post(
+        "/webhooks/slack/commands", content=body, headers=_slack_headers(body)
+    )
+    assert resp.status_code == 200
+    assert "Usage" in resp.json()["text"]
+
+
+@respx.mock
+async def test_command_agent_starts_a_run_and_acks_immediately(client):
+    respx.post("https://api.groq.com/openai/v1/chat/completions").mock(
+        return_value=Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "finish",
+                                        "arguments": json.dumps(
+                                            {"summary": "Done", "outcome": "success"}
+                                        ),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            },
+        )
+    )
+    respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = urlencode(
+        {
+            "text": "agent take KAN-1 through the post-merge workflow",
+            "response_url": "https://x",
+            "user_name": "alice",
+            "channel_id": "C123",
+        }
+    ).encode()
+    resp = await client.post(
+        "/webhooks/slack/commands", content=body, headers=_slack_headers(body)
+    )
+
+    assert resp.status_code == 200
+    assert "Starting agent run for KAN-1" in resp.json()["text"]
+
+    async with SessionLocal() as db:
+        result = await db.execute(select(AgentRun).where(AgentRun.ticket_key == "KAN-1"))
+        run = result.scalar_one()
+    assert run.status == "done"
+    assert run.final_summary == "Done"
 
 
 @respx.mock

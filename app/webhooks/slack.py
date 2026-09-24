@@ -8,11 +8,13 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.loop import resume_after_approval, run_agent
 from app.config import settings
+from app.correlation import extract_ticket_key
 from app.db import SessionLocal, get_db
 from app.idempotency import is_duplicate_delivery
 from app.integrations import groq_client, jira_client, slack_client
-from app.models import PullRequest, WorkflowRun
+from app.models import AgentRun, PullRequest, WorkflowRun
 from app.routing import jira_project_for_channel
 from app.security import verify_slack_signature
 
@@ -242,6 +244,12 @@ async def handle_slack_interaction(
     if action_id == "cancel_ticket":
         return {"replace_original": True, "text": "Cancelled."}
 
+    if action_id in ("agent_approve", "agent_reject"):
+        run_id = int(action.get("value", "0"))
+        background_tasks.add_task(resume_after_approval, run_id, action_id == "agent_approve")
+        verb = "Approved" if action_id == "agent_approve" else "Rejected"
+        return {"replace_original": True, "text": f"{verb} — resuming agent run..."}
+
     return {"status": "ignored"}
 
 
@@ -283,6 +291,39 @@ async def _create_issue_and_notify(
         await client.post(response_url, json=payload)
 
 
+AGENT_SYSTEM_PROMPT = (
+    "You are DevFlow's autonomous delivery agent. You have one goal, scoped to one Jira "
+    "ticket. Use the available tools to gather information, take action, and decide when "
+    "the goal is complete. Call exactly one tool per turn. Some tools require human "
+    "approval before they take effect — call them anyway when you decide they're needed; "
+    "approval is handled outside your control, and you'll see the result as an observation "
+    "on your next turn. When the goal is complete (or you determine it cannot be "
+    "completed), call the `finish` tool with a summary and outcome. Don't call `finish` "
+    "until you've actually gathered enough information to say something concrete."
+)
+
+
+async def _start_agent_run(channel: str, goal_text: str, ticket_key: str, requester: str) -> None:
+    async with SessionLocal() as db:
+        run = AgentRun(
+            goal=goal_text,
+            ticket_key=ticket_key,
+            status="planning",
+            requested_by=requester,
+            channel=channel,
+            messages=[
+                {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+                {"role": "user", "content": f"Goal: {goal_text}\nTicket: {ticket_key}"},
+            ],
+        )
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        run_id = run.id
+
+    await run_agent(run_id)
+
+
 @router.post("/commands")
 async def handle_slack_command(
     background_tasks: BackgroundTasks,
@@ -295,9 +336,25 @@ async def handle_slack_command(
     channel = form.get("channel_id", "")
 
     parts = text.split(maxsplit=1)
-    if len(parts) < 2 or parts[0] != "create":
-        return {"response_type": "ephemeral", "text": "Usage: /devflow create <summary>"}
 
-    summary = parts[1].strip()
-    background_tasks.add_task(_create_issue_and_notify, channel, summary, requester, response_url)
-    return {"response_type": "ephemeral", "text": f"Creating Jira issue for: {summary}..."}
+    if len(parts) >= 2 and parts[0] == "create":
+        summary = parts[1].strip()
+        background_tasks.add_task(_create_issue_and_notify, channel, summary, requester, response_url)
+        return {"response_type": "ephemeral", "text": f"Creating Jira issue for: {summary}..."}
+
+    if len(parts) >= 2 and parts[0] == "agent":
+        goal_text = parts[1].strip()
+        ticket_key = extract_ticket_key(goal_text)
+        if not ticket_key:
+            return {
+                "response_type": "ephemeral",
+                "text": "Usage: /devflow agent <goal mentioning a ticket key>, e.g. "
+                "\"take FEAT-2445 through the post-merge workflow\"",
+            }
+        background_tasks.add_task(_start_agent_run, channel, goal_text, ticket_key, requester)
+        return {"response_type": "ephemeral", "text": f"Starting agent run for {ticket_key}..."}
+
+    return {
+        "response_type": "ephemeral",
+        "text": "Usage: /devflow create <summary>  |  /devflow agent <goal mentioning a ticket key>",
+    }
