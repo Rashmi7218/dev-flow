@@ -69,7 +69,11 @@ async def handle_slack_events(
                     "• `/devflow create <summary>` to create a Jira ticket directly, no thread "
                     "needed\n"
                     "• `/devflow agent <goal mentioning a ticket key>` to run the autonomous "
-                    "agent on a goal",
+                    "agent on a goal\n"
+                    "• `/devflow comment <TICKET-KEY> <text>` to add a comment to an existing "
+                    "ticket\n"
+                    "• `/devflow describe <TICKET-KEY> <text>` to append text to an existing "
+                    "ticket's description",
                     channel=channel,
                     thread_ts=event.get("ts"),
                 )
@@ -360,7 +364,54 @@ async def handle_slack_command(
         background_tasks.add_task(_start_agent_run, channel, goal_text, ticket_key, requester)
         return {"response_type": "ephemeral", "text": f"Starting agent run for {ticket_key}..."}
 
+    if len(parts) >= 2 and parts[0] == "comment":
+        rest = parts[1].split(maxsplit=1)
+        if len(rest) < 2:
+            return {"response_type": "ephemeral", "text": "Usage: /devflow comment <TICKET-KEY> <text>"}
+        ticket_key, comment_text = rest[0].upper(), rest[1].strip()
+        background_tasks.add_task(_add_comment_and_notify, ticket_key, comment_text, response_url)
+        return {"response_type": "ephemeral", "text": f"Adding comment to {ticket_key}..."}
+
+    if len(parts) >= 2 and parts[0] == "describe":
+        rest = parts[1].split(maxsplit=1)
+        if len(rest) < 2:
+            return {"response_type": "ephemeral", "text": "Usage: /devflow describe <TICKET-KEY> <text>"}
+        ticket_key, description_text = rest[0].upper(), rest[1].strip()
+        background_tasks.add_task(
+            _append_description_and_notify, ticket_key, description_text, response_url
+        )
+        return {"response_type": "ephemeral", "text": f"Updating description for {ticket_key}..."}
+
     return {
         "response_type": "ephemeral",
-        "text": "Usage: /devflow create <summary>  |  /devflow agent <goal mentioning a ticket key>",
+        "text": "Usage: /devflow create <summary>  |  /devflow agent <goal mentioning a ticket "
+        "key>  |  /devflow comment <TICKET-KEY> <text>  |  /devflow describe <TICKET-KEY> <text>",
     }
+
+
+async def _add_comment_and_notify(ticket_key: str, comment_text: str, response_url: str) -> None:
+    try:
+        await jira_client.add_comment(ticket_key, comment_text)
+        url = f"{settings.jira_base_url}/browse/{ticket_key}"
+        text = f"✅ Comment added to <{url}|{ticket_key}>."
+    except Exception:
+        logger.exception("Failed to add comment to %s", ticket_key)
+        text = f"❌ Failed to add comment to {ticket_key}. Does it exist?"
+
+    async with httpx.AsyncClient() as client:
+        await client.post(response_url, json={"response_type": "ephemeral", "text": text})
+
+
+async def _append_description_and_notify(
+    ticket_key: str, description_text: str, response_url: str
+) -> None:
+    try:
+        await jira_client.append_description(ticket_key, description_text)
+        url = f"{settings.jira_base_url}/browse/{ticket_key}"
+        text = f"✅ Description updated on <{url}|{ticket_key}>."
+    except Exception:
+        logger.exception("Failed to update description for %s", ticket_key)
+        text = f"❌ Failed to update description for {ticket_key}. Does it exist?"
+
+    async with httpx.AsyncClient() as client:
+        await client.post(response_url, json={"response_type": "ephemeral", "text": text})

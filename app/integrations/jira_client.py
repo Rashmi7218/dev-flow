@@ -26,6 +26,48 @@ async def get_issue(key: str) -> dict:
         return resp.json()
 
 
+def _flatten_adf(doc: dict | None) -> str:
+    """Best-effort plain-text rendering of a Jira ADF doc, for re-feeding into _doc().
+
+    Handles the node types _doc() itself produces (paragraph, text, hardBreak) plus the
+    common ones Jira's own rich-text editor adds (heading, bulletList/orderedList,
+    listItem). Anything else is walked generically via its "content" children, so
+    unrecognized node types degrade to "lose formatting" rather than crashing.
+    """
+    if not doc:
+        return ""
+
+    def walk(node: dict) -> str:
+        node_type = node.get("type")
+        if node_type == "text":
+            return node.get("text", "")
+        if node_type == "hardBreak":
+            return "\n"
+        children = "".join(walk(c) for c in node.get("content", []))
+        if node_type in ("paragraph", "heading"):
+            return children + "\n\n"
+        if node_type == "listItem":
+            return f"- {children.strip()}\n"
+        if node_type in ("bulletList", "orderedList"):
+            return children + "\n"
+        return children
+
+    return walk(doc).strip()
+
+
+async def append_description(key: str, new_text: str) -> None:
+    issue = await get_issue(key)
+    existing_text = _flatten_adf(issue["fields"].get("description"))
+    combined = f"{existing_text}\n\n{new_text}" if existing_text else new_text
+
+    async with httpx.AsyncClient(auth=_auth()) as client:
+        resp = await client.put(
+            f"{settings.jira_base_url}/rest/api/3/issue/{key}",
+            json={"fields": {"description": _doc(combined)}},
+        )
+        resp.raise_for_status()
+
+
 async def create_issue(
     summary: str,
     description: str,

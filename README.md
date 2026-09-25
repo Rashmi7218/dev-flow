@@ -91,7 +91,7 @@ whole trace, not just the final outcome.
 
 ## Using the bot in Slack
 
-Four ways to talk to `@DevFlow` — two as an `@mention`, two as slash commands:
+Six ways to talk to `@DevFlow` — two as an `@mention`, four as slash commands:
 
 | # | How | Example | What happens |
 |---|-----|---------|---------------|
@@ -99,14 +99,17 @@ Four ways to talk to `@DevFlow` — two as an `@mention`, two as slash commands:
 | 2 | `@mention` **as a reply inside a thread** | Reply in the thread: `@DevFlow create ticket from this thread` | Reads the whole thread, drafts a Jira ticket (title, description, repro steps, severity, suggested assignee) from it, and posts the draft with Approve/Cancel buttons — nothing is created in Jira until someone clicks Approve |
 | 3 | `/devflow create <summary>` | `/devflow create Fix login button not responding on Safari` | Creates a Jira ticket immediately — no thread, no approval step — filed under whichever Jira project this channel's repo is bound to (the deployment default if unbound) |
 | 4 | `/devflow agent <goal mentioning a ticket key>` | `/devflow agent take KAN-42 through the post-merge workflow` | Starts the autonomous agent (see "Autonomous agent" above) — it looks up the ticket/PR/CI state itself and decides what to do next; any Jira status change it wants to make still needs your approval |
+| 5 | `/devflow comment <TICKET-KEY> <text>` | `/devflow comment KAN-42 blocked on infra, following up with platform team` | Adds a comment to an existing ticket immediately, no approval step |
+| 6 | `/devflow describe <TICKET-KEY> <text>` | `/devflow describe KAN-42 Acceptance criteria: DB reachable in dev and prod` | Appends the text to the ticket's existing description (fetches the current description, adds this text after it, writes it back) — doesn't overwrite what's already there |
 
 `@mention`ing the bot with none of the above — a plain "hi", or "create ticket" as a fresh
 message rather than a thread reply — gets this same list back as a help message, so it's
 discoverable from inside Slack without needing this README open.
 
 Rule of thumb: use 1 to check on something, 2 when the context already exists in a Slack
-discussion, 3 when you already know exactly what the ticket should say, and 4 when you want
-DevFlow to go gather the facts itself before doing anything.
+discussion, 3 when you already know exactly what a *new* ticket should say, 4 when you want
+DevFlow to go gather the facts itself before doing anything, and 5/6 to add to a ticket that
+already exists.
 
 ## Screenshots
 

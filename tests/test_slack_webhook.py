@@ -126,6 +126,81 @@ async def test_command_agent_starts_a_run_and_acks_immediately(client):
     assert run.final_summary == "Done"
 
 
+async def test_command_comment_without_text_returns_usage(client):
+    body = urlencode({"text": "comment KAN-1", "response_url": "https://x"}).encode()
+    resp = await client.post(
+        "/webhooks/slack/commands", content=body, headers=_slack_headers(body)
+    )
+    assert resp.status_code == 200
+    assert "Usage: /devflow comment" in resp.json()["text"]
+
+
+@respx.mock
+async def test_command_comment_adds_comment_and_acks_immediately(client):
+    comment_route = respx.post(
+        "https://test.atlassian.net/rest/api/3/issue/KAN-1/comment"
+    ).mock(return_value=Response(200, json={"id": "1"}))
+    response_url_route = respx.post("https://hooks.slack.test/reply").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = urlencode(
+        {
+            "text": "comment kan-1 this is blocked on infra",
+            "response_url": "https://hooks.slack.test/reply",
+        }
+    ).encode()
+    resp = await client.post(
+        "/webhooks/slack/commands", content=body, headers=_slack_headers(body)
+    )
+
+    assert resp.status_code == 200
+    assert "Adding comment to KAN-1" in resp.json()["text"]
+    assert comment_route.called
+    assert response_url_route.called
+    sent = json.loads(response_url_route.calls.last.request.content)
+    assert "KAN-1" in sent["text"]
+
+
+async def test_command_describe_without_text_returns_usage(client):
+    body = urlencode({"text": "describe KAN-1", "response_url": "https://x"}).encode()
+    resp = await client.post(
+        "/webhooks/slack/commands", content=body, headers=_slack_headers(body)
+    )
+    assert resp.status_code == 200
+    assert "Usage: /devflow describe" in resp.json()["text"]
+
+
+@respx.mock
+async def test_command_describe_appends_to_existing_description(client):
+    respx.get("https://test.atlassian.net/rest/api/3/issue/KAN-1").mock(
+        return_value=Response(200, json={"fields": {"description": None}})
+    )
+    put_route = respx.put("https://test.atlassian.net/rest/api/3/issue/KAN-1").mock(
+        return_value=Response(204)
+    )
+    response_url_route = respx.post("https://hooks.slack.test/reply").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = urlencode(
+        {
+            "text": "describe kan-1 Provision managed Postgres and wire up the ORM",
+            "response_url": "https://hooks.slack.test/reply",
+        }
+    ).encode()
+    resp = await client.post(
+        "/webhooks/slack/commands", content=body, headers=_slack_headers(body)
+    )
+
+    assert resp.status_code == 200
+    assert "Updating description for KAN-1" in resp.json()["text"]
+    assert put_route.called
+    assert response_url_route.called
+    sent = json.loads(response_url_route.calls.last.request.content)
+    assert "KAN-1" in sent["text"]
+
+
 @respx.mock
 async def test_command_create_acks_immediately_and_creates_issue_in_background(client):
     jira_route = respx.post("https://test.atlassian.net/rest/api/3/issue").mock(
@@ -251,6 +326,8 @@ async def test_app_mention_outside_thread_without_ticket_key_lists_all_usage_opt
     sent_text = json.loads(slack_route.calls.last.request.content)["text"]
     assert "/devflow create" in sent_text
     assert "/devflow agent" in sent_text
+    assert "/devflow comment" in sent_text
+    assert "/devflow describe" in sent_text
     assert "create ticket from this thread" in sent_text
 
 

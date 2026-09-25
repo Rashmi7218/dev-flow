@@ -65,6 +65,12 @@ fires.
   key) short-lived installation tokens, one App-level webhook covering every installed repo — no
   per-repo webhook configuration, no PAT tied to one person's account. See "GitHub App setup" in
   RESOURCES.md and the "Known limitations" below.
+- **Direct ticket updates** (`/devflow comment <TICKET-KEY> <text>`, `/devflow describe
+  <TICKET-KEY> <text>`): comment adds immediately via `jira_client.add_comment`; describe
+  appends to the existing description rather than overwriting it — fetches the ticket, renders
+  its current ADF description back to plain text (`jira_client._flatten_adf`), concatenates the
+  new text, and writes the combined result back. Both ack immediately and report success/failure
+  via `response_url`, same pattern as `/devflow create`.
 
 ## Module reference
 
@@ -89,7 +95,8 @@ app/
                                   /devflow create, all routing-aware for Jira project resolution
   integrations/github_client.py  GitHub REST calls (PR diff, workflow run jobs)
   integrations/github_auth.py    GitHub App JWT + installation-token exchange (in-process cache)
-  integrations/jira_client.py    Jira REST calls (get/create issue, comment)
+  integrations/jira_client.py    Jira REST calls (get/create issue, comment, transitions,
+                                  append-to-description via ADF flatten/re-render)
   integrations/slack_client.py   Slack Web API calls (post message, thread replies, permalink)
   integrations/groq_client.py    Groq chat-completions wrapper for all AI-layer calls
 ```
@@ -142,6 +149,17 @@ integration-style request→side-effect coverage per source.
   be fully automated from DevFlow's dashboard. The dashboard's "Manage GitHub App installation"
   link is the closest available shortcut (one click to GitHub's install page instead of a
   6-field manual webhook form per repo).
+
+**Direct ticket updates**
+- `/devflow describe` appends by round-tripping through plain text: it renders the existing ADF
+  description back to text (`jira_client._flatten_adf`), concatenates the new text, and re-runs
+  it through `_doc()`. `_flatten_adf` handles the node types `_doc()` itself produces plus the
+  common ones from Jira's rich-text editor (heading, bulletList/orderedList) — richer content
+  (tables, code blocks, mentions, panels, embedded media) will lose its original formatting on
+  the way through, though the text content itself survives.
+- Both `/devflow comment` and `/devflow describe` require an *existing* ticket — there's no
+  existence check before attempting the write, so a typo'd or nonexistent ticket key just
+  surfaces as a generic "❌ Failed" follow-up rather than a specific "ticket not found" message.
 
 ## Testing approach
 
