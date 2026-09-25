@@ -38,6 +38,52 @@ def test_empty_line_does_not_produce_empty_text_node():
                 assert node["text"] != ""
 
 
+def test_bold_asterisks_become_a_strong_mark():
+    doc = _doc("plain *bold* plain")
+    assert doc["content"][0]["content"] == [
+        {"type": "text", "text": "plain "},
+        {"type": "text", "text": "bold", "marks": [{"type": "strong"}]},
+        {"type": "text", "text": " plain"},
+    ]
+
+
+def test_bullet_prefixed_lines_become_a_real_bullet_list():
+    doc = _doc("intro\n- first item\n- second item")
+    assert doc["content"][0] == {
+        "type": "paragraph",
+        "content": [{"type": "text", "text": "intro"}],
+    }
+    assert doc["content"][1]["type"] == "bulletList"
+    items = doc["content"][1]["content"]
+    assert len(items) == 2
+    assert items[0]["content"][0]["content"] == [{"type": "text", "text": "first item"}]
+    assert items[1]["content"][0]["content"] == [{"type": "text", "text": "second item"}]
+
+
+def test_bullet_char_is_also_recognized_as_a_bullet_prefix():
+    # Slack's own rich-text editor serializes list items with a literal "•", not "-".
+    doc = _doc("• first item\n• second item")
+    assert doc["content"][0]["type"] == "bulletList"
+    assert len(doc["content"][0]["content"]) == 2
+
+
+def test_bold_and_bullets_round_trip_through_flatten_and_back():
+    original = "Summary *Acceptance Criteria:*\n- DB reachable\n- Migrations run"
+    round_tripped = _flatten_adf(_doc(original))
+    # Re-render the flattened text and confirm the structure survives a second pass,
+    # not just that the raw string looks similar.
+    doc_again = _doc(round_tripped)
+    bold_runs = [
+        node
+        for block in doc_again["content"]
+        if block.get("type") == "paragraph"
+        for node in block["content"]
+        if node.get("marks")
+    ]
+    assert any(run["text"] == "Acceptance Criteria:" for run in bold_runs)
+    assert any(block["type"] == "bulletList" for block in doc_again["content"])
+
+
 def test_flatten_adf_handles_missing_description():
     assert _flatten_adf(None) == ""
 

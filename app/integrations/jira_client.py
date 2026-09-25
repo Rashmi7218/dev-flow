@@ -1,22 +1,77 @@
+import re
+
 import httpx
 
 from app.config import settings
+
+_BOLD_RE = re.compile(r"\*([^*\n]+)\*")
+_BULLET_RE = re.compile(r"^[-•]\s+(.*)")
 
 
 def _auth() -> tuple[str, str]:
     return (settings.jira_email, settings.jira_api_token)
 
 
-def _doc(text: str) -> dict:
-    paragraphs = []
-    for para in text.split("\n\n"):
+def _text_runs(line: str) -> list[dict]:
+    """Split a line into ADF text nodes, turning *bold* spans (Slack's own bold syntax,
+    which is what shows up in a slash command's plain-text payload) into a strong mark."""
+    runs = []
+    pos = 0
+    for match in _BOLD_RE.finditer(line):
+        if match.start() > pos:
+            runs.append({"type": "text", "text": line[pos : match.start()]})
+        runs.append({"type": "text", "text": match.group(1), "marks": [{"type": "strong"}]})
+        pos = match.end()
+    if pos < len(line):
+        runs.append({"type": "text", "text": line[pos:]})
+    return runs or [{"type": "text", "text": line or " "}]
+
+
+def _render_block(block: str) -> list[dict]:
+    nodes: list[dict] = []
+    paragraph_lines: list[str] = []
+    bullet_items: list[dict] = []
+
+    def flush_paragraph() -> None:
+        if not paragraph_lines:
+            return
         content = []
-        for i, line in enumerate(para.split("\n")):
+        for i, line in enumerate(paragraph_lines):
             if i > 0:
                 content.append({"type": "hardBreak"})
-            content.append({"type": "text", "text": line or " "})
-        paragraphs.append({"type": "paragraph", "content": content})
-    return {"type": "doc", "version": 1, "content": paragraphs}
+            content.extend(_text_runs(line))
+        nodes.append({"type": "paragraph", "content": content})
+        paragraph_lines.clear()
+
+    def flush_bullets() -> None:
+        if bullet_items:
+            nodes.append({"type": "bulletList", "content": list(bullet_items)})
+            bullet_items.clear()
+
+    for line in block.split("\n"):
+        bullet_match = _BULLET_RE.match(line.strip())
+        if bullet_match:
+            flush_paragraph()
+            bullet_items.append(
+                {
+                    "type": "listItem",
+                    "content": [{"type": "paragraph", "content": _text_runs(bullet_match.group(1))}],
+                }
+            )
+        else:
+            flush_bullets()
+            paragraph_lines.append(line)
+
+    flush_paragraph()
+    flush_bullets()
+    return nodes or [{"type": "paragraph", "content": [{"type": "text", "text": " "}]}]
+
+
+def _doc(text: str) -> dict:
+    content = []
+    for block in text.split("\n\n"):
+        content.extend(_render_block(block))
+    return {"type": "doc", "version": 1, "content": content}
 
 
 async def get_issue(key: str) -> dict:
@@ -40,7 +95,10 @@ def _flatten_adf(doc: dict | None) -> str:
     def walk(node: dict) -> str:
         node_type = node.get("type")
         if node_type == "text":
-            return node.get("text", "")
+            value = node.get("text", "")
+            if any(mark.get("type") == "strong" for mark in node.get("marks", [])):
+                return f"*{value}*"
+            return value
         if node_type == "hardBreak":
             return "\n"
         children = "".join(walk(c) for c in node.get("content", []))

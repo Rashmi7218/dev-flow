@@ -151,12 +151,16 @@ integration-style request→side-effect coverage per source.
   6-field manual webhook form per repo).
 
 **Direct ticket updates**
-- `/devflow describe` appends by round-tripping through plain text: it renders the existing ADF
-  description back to text (`jira_client._flatten_adf`), concatenates the new text, and re-runs
-  it through `_doc()`. `_flatten_adf` handles the node types `_doc()` itself produces plus the
-  common ones from Jira's rich-text editor (heading, bulletList/orderedList) — richer content
-  (tables, code blocks, mentions, panels, embedded media) will lose its original formatting on
-  the way through, though the text content itself survives.
+- `/devflow describe` appends by round-tripping through a small internal markup format, not raw
+  plain text: `_doc()` recognizes `*bold*` spans (this is literally what Slack sends in a slash
+  command's `text` field for anything typed as bold in its rich-text composer, so this isn't
+  optional) and `-`/`•`-prefixed lines, rendering them as real ADF `strong` marks and
+  `bulletList`/`listItem` nodes instead of literal asterisks and flat text.  `_flatten_adf`
+  renders both back out (bold → `*text*`, list items → `- text`) when reading an existing
+  description, so appending twice in a row doesn't lose formatting on the second pass either.
+  Richer content this format doesn't cover (headings render as plain paragraphs, tables, code
+  blocks, mentions, panels, embedded media) still loses its original formatting on the way
+  through, though the text content itself survives.
 - Both `/devflow comment` and `/devflow describe` require an *existing* ticket — there's no
   existence check before attempting the write, so a typo'd or nonexistent ticket key just
   surfaces as a generic "❌ Failed" follow-up rather than a specific "ticket not found" message.
