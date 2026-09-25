@@ -72,6 +72,27 @@ async def _post_approval_prompt(run: AgentRun, tool_name: str, args: dict) -> No
     )
 
 
+async def _next_tool_call_message(messages: list[dict]) -> tuple[dict, list[dict]]:
+    """Get the model's next message, nudging once and retrying if it responds without a
+    tool call instead of picking one. tool_choice="required" (groq_client.agent_step)
+    should already force this, but isn't a hard guarantee across every model."""
+    message = await groq_client.agent_step(messages, TOOL_SCHEMAS)
+    messages = messages + [message]
+    if message.get("tool_calls"):
+        return message, messages
+
+    messages = messages + [
+        {
+            "role": "user",
+            "content": "You must respond by calling exactly one of the available tools, "
+            "not with plain text. Call a tool now.",
+        }
+    ]
+    message = await groq_client.agent_step(messages, TOOL_SCHEMAS)
+    messages = messages + [message]
+    return message, messages
+
+
 async def run_agent(run_id: int) -> None:
     async with SessionLocal() as db:
         run = await db.get(AgentRun, run_id)
@@ -85,17 +106,15 @@ async def run_agent(run_id: int) -> None:
 
         for _ in range(MAX_ITERATIONS):
             try:
-                message = await groq_client.agent_step(run.messages, TOOL_SCHEMAS)
+                message, run.messages = await _next_tool_call_message(run.messages)
             except Exception:
                 logger.exception("Agent step failed for run %s", run.id)
                 await _fail(db, run, "Failed to reach the AI model.")
                 return
 
-            run.messages = run.messages + [message]
-
             tool_calls = message.get("tool_calls")
             if not tool_calls:
-                await _fail(db, run, "Model did not call a tool; stopping.")
+                await _fail(db, run, "Model did not call a tool, even after a retry; stopping.")
                 return
 
             call = tool_calls[0]

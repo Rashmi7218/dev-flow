@@ -19,6 +19,10 @@ def _groq_response(tool_calls: list[dict]) -> Response:
     return Response(200, json={"choices": [{"message": {"role": "assistant", "tool_calls": tool_calls}}]})
 
 
+def _groq_text_response(content: str = "Sure, I can help with that.") -> Response:
+    return Response(200, json={"choices": [{"message": {"role": "assistant", "content": content}}]})
+
+
 async def _create_run(**overrides) -> int:
     defaults = dict(
         goal="take KAN-1 through the post-merge workflow",
@@ -75,6 +79,48 @@ async def test_multi_turn_happy_path_reaches_done():
 
     steps = await _get_steps(run_id)
     assert [s.kind for s in steps] == ["tool_call", "tool_call", "final"]
+    assert slack_route.called
+
+
+@respx.mock
+async def test_model_response_without_tool_call_is_nudged_and_retried():
+    groq_route = respx.post(GROQ_URL).mock(
+        side_effect=[
+            _groq_text_response(),
+            _groq_response([_tool_call("finish", {"summary": "All good", "outcome": "success"})]),
+        ]
+    )
+    respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    run_id = await _create_run()
+    await run_agent(run_id)
+
+    run = await _get_run(run_id)
+    assert run.status == "done"
+    assert run.final_summary == "All good"
+    assert groq_route.call_count == 2
+
+    # The retry nudge should be visible in the persisted conversation, not silently dropped.
+    assert any(
+        m.get("role") == "user" and "Call a tool now" in m.get("content", "")
+        for m in run.messages
+    )
+
+
+@respx.mock
+async def test_model_response_without_tool_call_twice_fails_cleanly():
+    respx.post(GROQ_URL).mock(side_effect=[_groq_text_response(), _groq_text_response()])
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    run_id = await _create_run()
+    await run_agent(run_id)  # would raise StopIteration if it tried a third Groq call
+
+    run = await _get_run(run_id)
+    assert run.status == "failed"
     assert slack_route.called
 
 

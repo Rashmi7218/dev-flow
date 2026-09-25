@@ -37,7 +37,7 @@ async def agent_step(messages: list[dict], tools: list[dict]) -> dict:
         "max_tokens": 800,
         "reasoning_effort": "low",
         "tools": tools,
-        "tool_choice": "auto",
+        "tool_choice": "required",
     }
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
