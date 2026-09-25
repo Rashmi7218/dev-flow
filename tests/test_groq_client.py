@@ -157,7 +157,11 @@ async def test_phrase_status_update_passes_facts_through(monkeypatch):
 
 
 @respx.mock
-async def test_agent_step_sends_tools_and_required_tool_choice():
+async def test_agent_step_sends_tools_and_auto_tool_choice():
+    # "auto", not "required" — Groq hard-fails the whole request with a 400 when
+    # tool_choice="required" and the model replies with plain text instead of a tool
+    # call, which bypasses the loop's nudge-and-retry entirely. See the comment on
+    # agent_step's tool_choice for the full story (found via a real production failure).
     route = respx.post("https://api.groq.com/openai/v1/chat/completions").mock(
         return_value=Response(
             200,
@@ -171,7 +175,7 @@ async def test_agent_step_sends_tools_and_required_tool_choice():
 
     sent = json.loads(route.calls.last.request.content)
     assert sent["tools"] == tools
-    assert sent["tool_choice"] == "required"
+    assert sent["tool_choice"] == "auto"
 
 
 @respx.mock

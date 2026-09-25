@@ -37,7 +37,13 @@ async def agent_step(messages: list[dict], tools: list[dict]) -> dict:
         "max_tokens": 800,
         "reasoning_effort": "low",
         "tools": tools,
-        "tool_choice": "required",
+        # "auto", not "required": with "required", Groq hard-fails the whole request with
+        # a 400 (code "tool_use_failed") whenever the model responds with plain text
+        # instead of a tool call, instead of just returning that response — which bypasses
+        # app/agent/loop.py's nudge-and-retry entirely, since that only runs on messages
+        # Groq actually returns. "auto" lets a text-only reply come back as a normal 200
+        # with no tool_calls, which is exactly what the nudge-and-retry is built to catch.
+        "tool_choice": "auto",
     }
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
