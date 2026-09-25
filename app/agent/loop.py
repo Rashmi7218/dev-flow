@@ -72,11 +72,34 @@ async def _post_approval_prompt(run: AgentRun, tool_name: str, args: dict) -> No
     )
 
 
+def _sanitize_assistant_message(message: dict) -> dict:
+    """Reduce a model response to the fields OpenAI-compatible APIs actually expect in a
+    *re-sent* message. Some providers include extra response-only fields (reasoning
+    traces, annotations, a null content) that are fine to receive but get rejected with a
+    400 if echoed back verbatim as conversation history on the next request — which is
+    exactly what happens here every turn, since run.messages is replayed in full."""
+    clean: dict = {"role": "assistant", "content": message.get("content") or ""}
+    tool_calls = message.get("tool_calls")
+    if tool_calls:
+        clean["tool_calls"] = [
+            {
+                "id": call["id"],
+                "type": call.get("type", "function"),
+                "function": {
+                    "name": call["function"]["name"],
+                    "arguments": call["function"]["arguments"],
+                },
+            }
+            for call in tool_calls
+        ]
+    return clean
+
+
 async def _next_tool_call_message(messages: list[dict]) -> tuple[dict, list[dict]]:
     """Get the model's next message, nudging once and retrying if it responds without a
     tool call instead of picking one. tool_choice="required" (groq_client.agent_step)
     should already force this, but isn't a hard guarantee across every model."""
-    message = await groq_client.agent_step(messages, TOOL_SCHEMAS)
+    message = _sanitize_assistant_message(await groq_client.agent_step(messages, TOOL_SCHEMAS))
     messages = messages + [message]
     if message.get("tool_calls"):
         return message, messages
@@ -88,7 +111,7 @@ async def _next_tool_call_message(messages: list[dict]) -> tuple[dict, list[dict
             "not with plain text. Call a tool now.",
         }
     ]
-    message = await groq_client.agent_step(messages, TOOL_SCHEMAS)
+    message = _sanitize_assistant_message(await groq_client.agent_step(messages, TOOL_SCHEMAS))
     messages = messages + [message]
     return message, messages
 

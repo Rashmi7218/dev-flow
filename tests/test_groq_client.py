@@ -1,5 +1,9 @@
 import json
 
+import pytest
+import respx
+from httpx import HTTPStatusError, Response
+
 from app.integrations import groq_client
 
 
@@ -150,3 +154,33 @@ async def test_phrase_status_update_passes_facts_through(monkeypatch):
     assert result == "It just failed."
     assert "Ticket: KAN-1" in captured["prompt"]
     assert captured["json_mode"] is False
+
+
+@respx.mock
+async def test_agent_step_sends_tools_and_required_tool_choice():
+    route = respx.post("https://api.groq.com/openai/v1/chat/completions").mock(
+        return_value=Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "tool_calls": []}}]},
+        )
+    )
+
+    messages = [{"role": "user", "content": "go"}]
+    tools = [{"type": "function", "function": {"name": "finish"}}]
+    await groq_client.agent_step(messages, tools)
+
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["tools"] == tools
+    assert sent["tool_choice"] == "required"
+
+
+@respx.mock
+async def test_agent_step_error_includes_response_body_for_debuggability():
+    respx.post("https://api.groq.com/openai/v1/chat/completions").mock(
+        return_value=Response(
+            400, json={"error": {"message": "messages: content field required"}}
+        )
+    )
+
+    with pytest.raises(HTTPStatusError, match="content field required"):
+        await groq_client.agent_step([{"role": "user", "content": "go"}], [])

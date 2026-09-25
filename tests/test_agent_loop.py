@@ -4,7 +4,7 @@ import respx
 from httpx import Response
 from sqlalchemy import select
 
-from app.agent.loop import resume_after_approval, run_agent
+from app.agent.loop import _sanitize_assistant_message, resume_after_approval, run_agent
 from app.db import SessionLocal
 from app.models import AgentRun, AgentStep
 
@@ -55,6 +55,86 @@ async def _get_steps(run_id: int) -> list[AgentStep]:
             select(AgentStep).where(AgentStep.run_id == run_id).order_by(AgentStep.step_number)
         )
         return list(result.scalars().all())
+
+
+def test_sanitize_assistant_message_strips_extra_fields_and_null_content():
+    # Shaped like a real provider response: extra response-only fields, null content,
+    # and an extra "index" key inside the tool_call itself (both seen from real vendors).
+    noisy = {
+        "role": "assistant",
+        "content": None,
+        "reasoning": "thinking about it...",
+        "annotations": [],
+        "tool_calls": [
+            {
+                "index": 0,
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "finish", "arguments": '{"summary": "x"}'},
+            }
+        ],
+    }
+
+    clean = _sanitize_assistant_message(noisy)
+
+    assert clean == {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "finish", "arguments": '{"summary": "x"}'},
+            }
+        ],
+    }
+
+
+@respx.mock
+async def test_noisy_model_response_is_sanitized_before_being_replayed():
+    noisy_message = {
+        "role": "assistant",
+        "content": None,
+        "reasoning": "internal thinking that shouldn't be replayed",
+        "tool_calls": [
+            {
+                "index": 0,
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "get_pull_requests_for_ticket",
+                    "arguments": "{}",
+                },
+            }
+        ],
+    }
+    groq_route = respx.post(GROQ_URL).mock(
+        side_effect=[
+            Response(200, json={"choices": [{"message": noisy_message}]}),
+            _groq_response([_tool_call("finish", {"summary": "All good", "outcome": "success"})]),
+        ]
+    )
+    respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    run_id = await _create_run()
+    await run_agent(run_id)
+
+    run = await _get_run(run_id)
+    assert run.status == "done"
+
+    # The second request sent to Groq must carry the *sanitized* first turn, not the raw
+    # noisy one — otherwise this is the exact 400 seen in production.
+    second_request_body = json.loads(groq_route.calls[1].request.content)
+    replayed_first_turn = second_request_body["messages"][2]
+    assert replayed_first_turn["content"] == ""
+    assert "reasoning" not in replayed_first_turn
+    assert replayed_first_turn["tool_calls"][0] == {
+        "id": "call_1",
+        "type": "function",
+        "function": {"name": "get_pull_requests_for_ticket", "arguments": "{}"},
+    }
 
 
 @respx.mock

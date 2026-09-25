@@ -45,7 +45,16 @@ async def agent_step(messages: list[dict], tools: list[dict]) -> dict:
             headers={"Authorization": f"Bearer {settings.groq_api_key}"},
             json=body,
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            # Groq's error responses explain *why* a request was rejected (e.g. which
+            # field failed validation) — httpx's default exception message doesn't
+            # include the body, and that detail is what actually makes a 4xx here
+            # debuggable instead of a guessing game.
+            raise httpx.HTTPStatusError(
+                f"{exc}: {resp.text}", request=exc.request, response=exc.response
+            ) from exc
         data = resp.json()
         return data["choices"][0]["message"]
 
