@@ -89,6 +89,25 @@ tool call, its result, approval requests/outcomes) is persisted (`AgentRun`/`Age
 `app/models.py`) and viewable on the dashboard's "Agent Runs" card — click a run to see the
 whole trace, not just the final outcome.
 
+## Using the bot in Slack
+
+Four ways to talk to `@DevFlow` — two as an `@mention`, two as slash commands:
+
+| # | How | Example | What happens |
+|---|-----|---------|---------------|
+| 1 | `@mention` with a ticket key | `@DevFlow what's the status of KAN-4?` | Posts the ticket's current Jira status, its latest linked PR, and its latest CI run, with a one-line AI-phrased summary of the most notable recent activity |
+| 2 | `@mention` **as a reply inside a thread** | Reply in the thread: `@DevFlow create ticket from this thread` | Reads the whole thread, drafts a Jira ticket (title, description, repro steps, severity, suggested assignee) from it, and posts the draft with Approve/Cancel buttons — nothing is created in Jira until someone clicks Approve |
+| 3 | `/devflow create <summary>` | `/devflow create Fix login button not responding on Safari` | Creates a Jira ticket immediately — no thread, no approval step — filed under whichever Jira project this channel's repo is bound to (the deployment default if unbound) |
+| 4 | `/devflow agent <goal mentioning a ticket key>` | `/devflow agent take KAN-42 through the post-merge workflow` | Starts the autonomous agent (see "Autonomous agent" above) — it looks up the ticket/PR/CI state itself and decides what to do next; any Jira status change it wants to make still needs your approval |
+
+`@mention`ing the bot with none of the above — a plain "hi", or "create ticket" as a fresh
+message rather than a thread reply — gets this same list back as a help message, so it's
+discoverable from inside Slack without needing this README open.
+
+Rule of thumb: use 1 to check on something, 2 when the context already exists in a Slack
+discussion, 3 when you already know exactly what the ticket should say, and 4 when you want
+DevFlow to go gather the facts itself before doing anything.
+
 ## Screenshots
 
 **Dashboard** — recent events feed + per-ticket timeline aggregating GitHub, Jira, and CI data
@@ -192,15 +211,26 @@ Four independent things determine whether a repo's events actually reach the rig
 
 ### Onboarding a new repo — checklist
 
+**"DevFlow app" means two different, unrelated installations** — mixing them up is the single
+most common way this setup silently doesn't work. Installing one does *not* install the other:
+
+- the **GitHub App**, installed *on a repo*, on github.com — controls whether GitHub sends
+  DevFlow any events at all.
+- the **Slack app/bot**, invited *to a channel*, in Slack — controls whether DevFlow can post
+  *to that channel*. Being in a channel says nothing about which repo (if any) is bound to it.
+
+Both are required, they're independent, and neither implies the other. The checklist below does
+all four things from "The moving parts" above, in order:
+
 | # | Where | What to do |
 |---|-------|------------|
-| 1 | GitHub | Install the App on the repo — dashboard "Repo Routing" card → "Manage GitHub App installation ↗" → pick the repo (or confirm it's covered by "All repositories"). |
+| 1 | **GitHub App** (github.com, not Slack) | Install it on the repo — dashboard "Repo Routing" card → "Manage GitHub App installation ↗" → pick the repo (or confirm it's covered by "All repositories"). This is what makes GitHub send DevFlow this repo's events at all. |
 | 2 | Jira | Have (or create) a project for this repo, note its project key (e.g. `KAN`, `WID`) — Jira Admin → Projects, or create one straight from the "Create project" button. |
 | 3 | Slack | Decide which channel should get this repo's notifications. Copy its **channel ID** (open the channel → channel name → "View channel details" → scroll down → "Copy channel ID", *not* the channel name — `chat.postMessage` needs the ID, something like `C0123456`). |
-| 4 | Slack | Invite the bot to that channel: `/invite @DevFlow`. |
+| 4 | **Slack app/bot** (in Slack, not GitHub) | Invite it to that channel: `/invite @DevFlow`. This only affects that one channel — it does nothing for GitHub events or for any repo binding. |
 | 5 | DevFlow dashboard → Repo Routing | Under "Jira project per repo": add `owner/repo` → the project key from step 2. |
 | 6 | DevFlow dashboard → Repo Routing | Under "Slack channel bindings": add `owner/repo` → the channel ID from step 3. |
-| 7 | Verify | Open a test PR on the repo and confirm the notification lands in the channel you just bound — check that *specific* channel, not whichever one you assumed. Channel IDs (`C0123456`) don't read as channel names, so it's easy to check the wrong one. |
+| 7 | Verify | Open a test PR on the repo and confirm the notification lands in the channel you just bound — check that *specific* channel, not whichever one you assumed. Channel IDs (`C0123456`) don't read as channel names, so it's easy to check the wrong one. If nothing shows up, first confirm step 1 (GitHub App on this repo) actually happened — a Slack-only setup (steps 3-6 with no step 1) looks identical to a working one until you check GitHub's delivery log. |
 
 ### Troubleshooting
 
@@ -231,6 +261,9 @@ pytest -v
 Tests run against an in-memory SQLite DB and mock all outbound HTTP (GitHub, Jira, Slack, Groq)
 via `respx` — no live credentials or Docker needed. CI (`.github/workflows/ci.yml`) runs this
 suite on every push/PR.
+
+For a manual QA checklist to validate a real deployment (live GitHub/Jira/Slack, not mocked),
+see [TESTING.md](TESTING.md).
 
 ## Known limitations
 

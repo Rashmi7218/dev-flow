@@ -61,9 +61,15 @@ async def handle_slack_events(
                 background_tasks.add_task(_propose_ticket_from_thread, channel, thread_ts)
             elif not thread_ts:
                 await slack_client.post_message(
-                    "Mention me with a ticket key (e.g. \"what's the status of KAN-4\") for a "
-                    "status update, or inside a thread with \"create ticket from this thread\" "
-                    "to turn that discussion into a Jira ticket.",
+                    "Here's what I can do:\n"
+                    "• Mention me with a ticket key (e.g. \"what's the status of KAN-4\") for a "
+                    "status update\n"
+                    "• Reply to me inside a thread with \"create ticket from this thread\" to "
+                    "turn that discussion into a Jira ticket\n"
+                    "• `/devflow create <summary>` to create a Jira ticket directly, no thread "
+                    "needed\n"
+                    "• `/devflow agent <goal mentioning a ticket key>` to run the autonomous "
+                    "agent on a goal",
                     channel=channel,
                     thread_ts=event.get("ts"),
                 )

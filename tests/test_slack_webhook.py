@@ -226,6 +226,35 @@ async def test_duplicate_event_id_is_not_reprocessed(client):
 
 
 @respx.mock
+@respx.mock
+async def test_app_mention_outside_thread_without_ticket_key_lists_all_usage_options(client):
+    slack_route = respx.post("https://slack.com/api/chat.postMessage").mock(
+        return_value=Response(200, json={"ok": True})
+    )
+
+    body = json.dumps(
+        {
+            "type": "event_callback",
+            "event": {
+                "type": "app_mention",
+                "text": "<@BOTID> create ticket for this task \"Database Provisioning\"",
+                "channel": "C123",
+                "ts": "111.222",
+            },
+        }
+    ).encode()
+    resp = await client.post(
+        "/webhooks/slack/events", content=body, headers=_slack_headers(body)
+    )
+
+    assert resp.status_code == 200
+    sent_text = json.loads(slack_route.calls.last.request.content)["text"]
+    assert "/devflow create" in sent_text
+    assert "/devflow agent" in sent_text
+    assert "create ticket from this thread" in sent_text
+
+
+@respx.mock
 async def test_app_mention_with_ticket_key_answers_status_query(client):
     respx.get("https://test.atlassian.net/rest/api/3/issue/KAN-4").mock(
         return_value=Response(
